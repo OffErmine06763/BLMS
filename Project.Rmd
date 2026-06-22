@@ -11,6 +11,8 @@ library(tidyverse)
 library(patchwork)
 library(dplyr)
 library(GGally)
+library(corrplot)
+library(BAS)
 ```
 
 # Initial Exploration of the Data
@@ -28,7 +30,6 @@ unique(table_raw$satisfaction)
 unique(table_raw$Customer.Type)
 unique(table_raw$Type.of.Travel)
 unique(table_raw$Class)
-# table(table_raw$Seat.comfort)
 ```
 
 ## Cleanup
@@ -67,7 +68,7 @@ head(table)
 ```
 
 | Name | Type | Values |
-|-------------------------|------------------|-----------------------------|
+|----|----|----|
 | Satisfaction | categorical binary | 'Satisfied' / 'Dissatisfied' |
 | Customer.Type | categorical binary | 'Loyal' / 'Disloyal' |
 | Age | numeric discrete |  |
@@ -135,7 +136,7 @@ all_vars <- c(all_cat_vars, num_vars)
 target_var <- "Satisfaction"
 ```
 
-## Standardize
+## Standardize and Encode
 
 ```{r}
 table_std <- table %>%
@@ -143,6 +144,11 @@ table_std <- table %>%
     c(Departure.Delay, Arrival.Delay, Flight.Distance, Age),
     ~ as.numeric(scale(.))
   ))
+
+# the encoding in R can be done just by converting the column of strings to a column of Factor (which just maps the strings to ints)
+# BAS will treat Factors as categorical variables, introducing the dummy variables for the n-1 possible values it can assume.
+table_enc <- table_std %>%
+  mutate(across(where(is.character), as.factor))
 ```
 
 ## Visualization
@@ -293,4 +299,90 @@ ggpairs(
   columns = num_vars,
   aes(color = Satisfaction, alpha = 0.5)
 )
+```
+
+## Correlation
+
+From the correlation matrix we see that most predictors are uncorrelated, with a few exceptions, such as
+
+- between the "Online" sth sth variables, which kinda makes sense, a good online service is good across all aspects.
+
+- between the flight enjoyment variables (Seat.Comfort, Food.and.Drink, Inflight.Entertainment)
+
+and more with similar interpretations.
+
+```{r fig.width=12, fig.height=12}
+
+corr_matrix <- cor(table_std[, c(num_vars, score_vars)], use = "complete.obs")
+
+corrplot(corr_matrix,
+         method = "color",
+         type = "upper",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45)
+```
+
+# Initial Regression Model
+
+Start by fitting a regression model using only the predictors
+
+$$\texttt{Age},\ \texttt{SeatComfort},\ \texttt{FlightDistance},\ \texttt{Class},\ \texttt{DepartureDelay},\ \texttt{ArrivalDelay}$$
+
+First of all, BAS is using BMA (Bayesian Model Averaging), so we train many models and give them a weight.
+
+To interpret the summary:
+
+- P(B != 0 \| Y): aka Posterior Inclusion Probability (PIP), how likely the variable belongs to the true model
+
+- The 1/0 under the models for the first rows (those corresponding to the predictors): boolean flag, whether that predictor is included in the model
+
+- BF: Bayes Factor, idk what it is but it's a metric that compares each model with the best one, the higher the better, the best model has BF = 1 by construction.
+
+- PostProb: probability that that model is the true one, given the data
+
+- logmar: the higher the better
+
+From the summary we see that:
+
+- Flight.Distance and Departure.Delay are not selected very frequently across all the models trained by BAS, they might not capture useful data to fit the Satisfaction
+
+- The best model obtained is much better than the others: PostProbs and BF are much higher than the other models, meaning that the data strongly prefers model 1 over the other alternatives.
+
+- R2 is very bad for all the models, we are not fitting the data at all
+
+In the summary of coefficients reports the average over the evaluated models weighted by their posterior probability, where
+
+- post mean: average effect of a variable across all models, but models where the variable is absent count as 0 effect, so this is a shrunken, uncertainty-aware estimate.
+
+- post SD: uncertainty on the effect, including the model uncertainty
+
+so we can say that
+
+- Age has a positive effect and high PIP: older passengers have higher probability of satisfaction; the same goes for Seat.Comfort, as expected
+
+- Arrival.Delay has a negative effect (as expected) and discrete PIP, so there is some uncertainty in whether this predictor is actually important.
+
+- Departure.Delay has almost 0 mean and very poor PIP, this is probably due to the fact that once Arrival.Delay is included, Departure.Delay adds little information.
+
+- Flight.Distance: same as for Departure.Delay, this is probably irrelevant because people know the flight length in advance.
+
+The graph of the residuals shows two parallel lines (the two target classes), but the red line isn't horizontal around the y = 0 line, so this model is garbage.
+
+Note: all the values are generated with some randomness, so they can change slightly, but the interpretation should remain the same
+
+```{r fig.width=8, fig.height=8}
+
+fit <- bas.glm(
+  Satisfaction ~ Age + Flight.Distance + Seat.Comfort + Departure.Delay + Arrival.Delay,
+  data = table_enc, family = binomial()
+)
+
+summary(fit)
+coef(fit)
+print("--------------------------------------------", quote = FALSE)
+confint(coef(fit))
+
+plot(fit, which = 1)
+plot(confint(coef(fit)),main="coeff confidence intervals")
 ```
