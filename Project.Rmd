@@ -1,0 +1,296 @@
+---
+title: "BLMS Project: Airline Customer Satisfaction"
+output: html_notebook
+---
+
+# Includes
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+library(dplyr)
+library(GGally)
+```
+
+# Initial Exploration of the Data
+
+```{r}
+
+table_raw <- read.csv("data.csv")
+
+head(table_raw)
+
+rows <- nrow(table_raw)
+cols <- ncol(table_raw)
+
+unique(table_raw$satisfaction)
+unique(table_raw$Customer.Type)
+unique(table_raw$Type.of.Travel)
+unique(table_raw$Class)
+# table(table_raw$Seat.comfort)
+```
+
+## Cleanup
+
+Rename some of the columns / values to fix capitalization
+
+```{r}
+table <- table_raw
+
+names(table)[names(table) == "satisfaction"                     ] <- "Satisfaction"
+names(table)[names(table) == "Seat.comfort"                     ] <- "Seat.Comfort"
+names(table)[names(table) == "Departure.Arrival.time.convenient"] <- "Departure.Arrival.Time.Convenient"
+names(table)[names(table) == "Food.and.drink"                   ] <- "Food.and.Drink"
+names(table)[names(table) == "Gate.location"                    ] <- "Gate.Location"
+names(table)[names(table) == "Inflight.wifi.service"            ] <- "Inflight.WiFi"
+names(table)[names(table) == "Inflight.entertainment"           ] <- "Inflight.Entertainment"
+names(table)[names(table) == "Online.support"                   ] <- "Online.Support"
+names(table)[names(table) == "Ease.of.Online.booking"           ] <- "Ease.of.Online.Booking"
+names(table)[names(table) == "On.board.service"                 ] <- "On.Board.Service"
+names(table)[names(table) == "Leg.room.service"                 ] <- "Leg.Room"
+names(table)[names(table) == "Baggage.handling"                 ] <- "Baggage.Handling"
+names(table)[names(table) == "Checkin.service"                  ] <- "Checkin"
+names(table)[names(table) == "Online.boarding"                  ] <- "Online.Boarding"
+names(table)[names(table) == "Departure.Delay.in.Minutes"       ] <- "Departure.Delay"
+names(table)[names(table) == "Arrival.Delay.in.Minutes"         ] <- "Arrival.Delay"
+
+table$Satisfaction  [table$Satisfaction   == "satisfied"        ] <- "Satisfied"
+table$Satisfaction  [table$Satisfaction   == "dissatisfied"     ] <- "Dissatisfied"
+table$Customer.Type [table$Customer.Type  == "Loyal Customer"   ] <- "Loyal"
+table$Customer.Type [table$Customer.Type  == "disloyal Customer"] <- "Disloyal"
+table$Type.of.Travel[table$Type.of.Travel == "Business travel"  ] <- "Businness"
+table$Type.of.Travel[table$Type.of.Travel == "Personal Travel"  ] <- "Personal"
+
+head(table)
+
+```
+
+| Name | Type | Values |
+|-------------------------|------------------|-----------------------------|
+| Satisfaction | categorical binary | 'Satisfied' / 'Dissatisfied' |
+| Customer.Type | categorical binary | 'Loyal' / 'Disloyal' |
+| Age | numeric discrete |  |
+| Type.of.Travel | categorical binary | 'Business' / 'Personal’ |
+| Class | categorical | 'Business' / 'Eco' / 'Eco Plus’ |
+| Flight.Distance | numeric discrete | in kilometers |
+| Seat.Comfort | score | from 0 to 5 |
+| Departure.Arrival.Time.Convenient | score | from 0 to 5 |
+| Food.and.Drink | score | from 0 to 5 |
+| Gate.Location | score | from 0 to 5 |
+| Inflight.WiFi | score | from 0 to 5 |
+| Inflight.Entertainment | score | from 0 to 5 |
+| Online.Support | score | from 0 to 5 |
+| Ease.of.Online.Booking | score | from 0 to 5 |
+| On.Board.Service | score | from 0 to 5 |
+| Leg.Room | score | from 0 to 5 |
+| Baggage.Handling | score | from 0 to 5 |
+| Checkin | score | from 0 to 5 |
+| Cleanliness | score | from 0 to 5 |
+| Online.Boarding | score | from 0 to 5 |
+| Departure.Delay | numeric discrete | in minutes |
+| Arrival.Delay | numeric discrete | in minutes |
+
+Inspect for NA
+
+```{r}
+table[!complete.cases(table), ]
+
+# only 3 observations with NA in the arrival delay, just remove them from the dataset
+table <- na.omit(table)
+```
+
+Define some useful constants
+
+```{r}
+score_vars <- c(
+  "Seat.Comfort",
+  "Departure.Arrival.Time.Convenient",
+  "Food.and.Drink",
+  "Gate.Location",
+  "Inflight.WiFi",
+  "Inflight.Entertainment",
+  "Online.Support",
+  "Ease.of.Online.Booking",
+  "On.Board.Service",
+  "Leg.Room",
+  "Baggage.Handling",
+  "Checkin",
+  "Cleanliness",
+  "Online.Boarding"
+)
+other_cat_vars <- c(
+  "Customer.Type",
+  "Type.of.Travel",
+  "Class"
+)
+all_cat_vars <- c(other_cat_vars, score_vars)
+num_vars <- c(
+  "Age",
+  "Flight.Distance",
+  "Departure.Delay",
+  "Arrival.Delay"
+)
+all_vars <- c(all_cat_vars, num_vars)
+target_var <- "Satisfaction"
+```
+
+## Standardize
+
+```{r}
+table_std <- table %>%
+  mutate(across(
+    c(Departure.Delay, Arrival.Delay, Flight.Distance, Age),
+    ~ as.numeric(scale(.))
+  ))
+```
+
+## Visualization
+
+### Boxplots
+
+Boxplots of each variable against satisfaction. As expected satisfied customers show greater averages in the service quality scores and lower averages for delays.
+
+```{r fig.width=14, fig.height=25}
+
+pairs <- lapply(all_vars, function(v) {
+  c("Satisfaction", v)
+})
+
+plots <- lapply(pairs, function(p) {
+  cat_var <- p[1]
+  num_var <- p[2]
+
+  ggplot(table_std, aes(x = .data[[cat_var]], y = .data[[num_var]])) +
+  geom_boxplot() +
+  labs(
+    x = cat_var,
+    y = num_var,
+    title =""
+  ) +
+  theme_bw()
+})
+
+wrap_plots(plots, ncol = 3)
+```
+
+### Barplots
+
+Just to show the number of observations of each value of the categorical variables
+
+```{r fig.width=14, fig.height=25}
+
+plot_bar <- function(vars, scale = NULL) {
+  x_scale <- if (!is.null(scale)) {
+    scale_x_discrete(limits = scale)
+  } else {
+    NULL
+  }
+  
+  plots <- lapply(vars, function(v) {
+    ggplot(table, aes(
+      x = factor(.data[[v]]),
+      fill = factor(Satisfaction)
+    )) +
+      
+    geom_bar() +
+      
+    x_scale +
+    scale_fill_manual(
+      values = c(
+        "Dissatisfied" = "red",
+        "Satisfied" = "forestgreen"
+      )
+    ) +
+      
+    labs(
+      title = v,
+      x = NULL,
+      y = "Count",
+      fill = "Satisfaction"
+    ) +
+    theme_bw()
+  })
+}
+
+
+plots <- plot_bar(c(target_var, other_cat_vars))
+plots <- c(plots, plot_bar(score_vars, c("0", "1", "2", "3", "4", "5")))
+
+wrap_plots(plots, ncol = 3)
+```
+
+### Barplots Percentages
+
+Here we show the percentages of satisfied/dissatisfied customers for each value of each categorical variable. This is somewhat more informative than the normal barplots, tho the trends can be approximated visually in the graphs above.
+
+Note: there are some odd values, e.g. 100% of the customers that gave Leg.Room = 0 are satisfied, but notice that there is only 1 such observation, thus it does not represent a statistically relevant phenomena -\> almost all scores show few observations for score = 0, so generally ignore the corresponding column in the following graphs.
+
+So excluding the first column, we see that the percentage of customers that gave score = x increases as x increases, as expected.
+
+```{r fig.width=14, fig.height=20}
+
+plot_bar_perc <- function(vars, scale = NULL) {
+  x_scale <- if (!is.null(scale)) {
+    scale_x_discrete(limits = scale)
+  } else {
+    NULL
+  }
+  
+  plots <- lapply(vars, function(v) {
+
+    ggplot(table, aes(
+      x = factor(.data[[v]]),
+      fill = Satisfaction
+    )) +
+    geom_bar(position = "fill") +
+  
+    geom_text(
+      stat = "count",
+      aes(label = after_stat(count)),
+      position = position_fill(vjust = 0.5),
+      color = "white",
+      size = 3
+    ) +
+  
+    scale_y_continuous(labels = scales::percent) +
+    x_scale +
+    scale_fill_manual(
+      values = c(
+        "Dissatisfied" = "red",
+        "Satisfied" = "forestgreen"
+      )
+    ) +
+      
+    labs(
+      title = v,
+      x = NULL,
+      y = "Percentage",
+      fill = "Satisfaction"
+    ) +
+    theme_bw()
+  })
+}
+
+
+plots <- c(plot_spacer(), plot_bar_perc(other_cat_vars))
+plots <- c(plots, plot_bar_perc(score_vars, c("0", "1", "2", "3", "4", "5")))
+
+wrap_plots(plots, ncol = 3)
+
+```
+
+### Pairplots
+
+Using only the numerical variables, since the scores are just a whole lot of overlapping points.
+
+Those are not very informative imo.
+
+```{r fig.width=10, fig.height=10}
+
+ggpairs(
+  table_std,
+  columns = num_vars,
+  aes(color = Satisfaction, alpha = 0.5)
+)
+```
