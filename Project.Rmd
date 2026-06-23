@@ -120,19 +120,18 @@ score_vars <- c(
   "Cleanliness",
   "Online.Boarding"
 )
-other_cat_vars <- c(
+cat_vars <- c(
   "Customer.Type",
   "Type.of.Travel",
   "Class"
 )
-all_cat_vars <- c(other_cat_vars, score_vars)
 num_vars <- c(
   "Age",
   "Flight.Distance",
   "Departure.Delay",
   "Arrival.Delay"
 )
-all_vars <- c(all_cat_vars, num_vars)
+all_vars <- c(score_vars, cat_vars, num_vars)
 target_var <- "Satisfaction"
 ```
 
@@ -220,7 +219,7 @@ plot_bar <- function(vars, scale = NULL) {
 }
 
 
-plots <- plot_bar(c(target_var, other_cat_vars))
+plots <- plot_bar(c(target_var, cat_vars))
 plots <- c(plots, plot_bar(score_vars, c("0", "1", "2", "3", "4", "5")))
 
 wrap_plots(plots, ncol = 3)
@@ -279,7 +278,7 @@ plot_bar_perc <- function(vars, scale = NULL) {
 }
 
 
-plots <- c(plot_spacer(), plot_bar_perc(other_cat_vars))
+plots <- c(plot_spacer(), plot_bar_perc(cat_vars))
 plots <- c(plots, plot_bar_perc(score_vars, c("0", "1", "2", "3", "4", "5")))
 
 wrap_plots(plots, ncol = 3)
@@ -367,14 +366,14 @@ so we can say that
 
 - Flight.Distance: same as for Departure.Delay, this is probably irrelevant because people know the flight length in advance.
 
-The graph of the residuals shows two parallel lines (the two target classes), but the red line isn't horizontal around the y = 0 line, so this model is garbage.
+In the graph of the residuals the x is the prediction in the log-odds scale (I assume / ChatGPT says). I have to admit that i really can't understand that residual plot tho: when our model predicts log-odds = 0 (thus p(satisfied) = 0.5), we observe some residuals that are 0, which is impossible, any observations would either have satisfied = 0 or = 1, in both cases our prediction had a residual of 0.5. The same goes for residuals greater than 1. So maybe even the y is in the log-odds scale? but this still doesn't make sense, consider the right side, i guess (ChatGPT says) that the two lines correspond to the two values satisfaction can assume, then when we predict 2 (p = 0.88), we have a residual of -2 for one class and -1 for the other, this means that we should have predicted 4 or 3 (to be exact for one class) (or equivalently predict 0 and 1) , but this means making a prediction where we are more strongly convinced that satisfaction = 1 (or = 0 equivalently) for both classes =\> contradiction... i just don't know how to read it and ChatGPT isn't helping.
 
 Note: all the values are generated with some randomness, so they can change slightly, but the interpretation should remain the same
 
-```{r fig.width=8, fig.height=8}
+```{r fig.width=10, fig.height=10}
 
 fit <- bas.glm(
-  Satisfaction ~ Age + Flight.Distance + Seat.Comfort + Departure.Delay + Arrival.Delay,
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
   data = table_enc, family = binomial()
 )
 
@@ -383,6 +382,47 @@ coef(fit)
 print("--------------------------------------------", quote = FALSE)
 confint(coef(fit))
 
+par(mfrow = c(2, 2))
+
 plot(fit, which = 1)
+plot(fit, which = 2)
+plot(fit, which = 3)
+plot(fit, which = 4)
+
+par(mfrow = c(1, 1))
+
+plot(confint(coef(fit)),main="coeff confidence intervals")
+```
+
+## Seat.Comfort as Categorical
+
+Much slower but gives a better R2, however there are some weird things. We can expect a model deciding to exclude Seat.Comfort as a whole to make predictions, however here (since it's treated as 5 distinct variables) it can happen (as in model 1) that only a subset of the levels is selected, and others are ignored. Now, if the selected ones where all the k highest levels it would be fine (it means "if the score is above below a certain value, it might as well be treated as a 0 (which is the baseline level)"), however we see that level 5 is ignored, which means "if the observation has score = 5, it is equivalent to score = 0" which is clearly wrong. The solutions to this are three: group priors (idk what they are), hierarchical structure (idk what it is) or treating the factors as numeric, as done above.
+
+This still has a better R2 (not that it was hard to be better than the previous model), but i still struggle to understand the residual plot.
+
+```{r fig.width=10, fig.height=10}
+
+table_bas <- table_enc %>%
+  mutate(across(c(Seat.Comfort), as.factor))
+
+fit <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data = table_bas, family = binomial()
+)
+
+summary(fit)
+coef(fit)
+print("--------------------------------------------", quote = FALSE)
+confint(coef(fit))
+
+par(mfrow = c(2, 2))
+
+plot(fit, which = 1)
+plot(fit, which = 2)
+plot(fit, which = 3)
+plot(fit, which = 4)
+
+par(mfrow = c(1, 1))
+
 plot(confint(coef(fit)),main="coeff confidence intervals")
 ```
