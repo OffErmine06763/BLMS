@@ -135,18 +135,62 @@ all_vars <- c(score_vars, cat_vars, num_vars)
 target_var <- "Satisfaction"
 ```
 
+## Train-Test Split
+
+We use the first `n_test` observations as the test set and the remaining ones as the learning set. This way the split is fully reproducible without relying on random sampling.
+
+Perform train-test split at the beginning of the analysis since even variable selection based on a model trained on the whole data is then a data leakage when measuring the performance on the test set.
+
+```{r}
+
+# to make it random
+set.seed(42)
+idx <- sample(nrow(table))
+
+table_test  <- table[idx[1:300], ]
+table_train <- table[idx[301:nrow(table)], ]
+
+#n_test    <- 400
+#n_total   <- nrow(table_enc)
+#n_learn   <- n_total - n_test
+
+rownames(table_train) <- seq_len(nrow(table_train))
+rownames(table_test)  <- seq_len(nrow(table_test))
+
+cat("Learning set size:", nrow(table_train), "\n")
+cat("Test set size:    ", nrow(table_test ), "\n")
+```
+
 ## Standardize and Encode
 
 ```{r}
-table_std <- table %>%
-  mutate(across(
-    c(Departure.Delay, Arrival.Delay, Flight.Distance, Age),
-    ~ as.numeric(scale(.))
-  ))
+
+# Compute mean and sd on TRAIN only
+train_means <- sapply(table_train[, num_vars], mean)
+train_sds   <- sapply(table_train[, num_vars], sd)
+
+# Scale train
+table_std <- table_train
+table_std[, num_vars] <- scale(table_train[, num_vars], center = train_means, scale = train_sds)
+
+# Scale test using 🚂 parameters
+test_std <- table_test
+test_std[, num_vars] <- scale(table_test[, num_vars], center = train_means, scale = train_sds)
 
 # the encoding in R can be done just by converting the column of strings to a column of Factor (which just maps the strings to ints)
 # BAS will treat Factors as categorical variables, introducing the dummy variables for the n-1 possible values it can assume.
 table_enc <- table_std %>%
+  mutate(across(where(is.character), as.factor))
+test_enc  <- test_std %>%
+  mutate(across(where(is.character), as.factor))
+
+# For other purposes we might still want to use the full dataset, like visualization
+table_full_std <- table %>%
+  mutate(across(
+    c(Departure.Delay, Arrival.Delay, Flight.Distance, Age),
+    ~ as.numeric(scale(.))
+  ))
+table_full_enc <- table_full_std %>%
   mutate(across(where(is.character), as.factor))
 ```
 
@@ -166,7 +210,7 @@ plots <- lapply(pairs, function(p) {
   cat_var <- p[1]
   num_var <- p[2]
 
-  ggplot(table_std, aes(x = .data[[cat_var]], y = .data[[num_var]])) +
+  ggplot(table_full_std, aes(x = .data[[cat_var]], y = .data[[num_var]])) +
   geom_boxplot() +
   labs(
     x = cat_var,
@@ -316,7 +360,7 @@ and more with similar interpretations.
 
 ```{r fig.width=12, fig.height=12}
 
-corr_matrix <- cor(table_std[, c(num_vars, score_vars)], use = "complete.obs")
+corr_matrix <- cor(table_full_std[, c(num_vars, score_vars)], use = "complete.obs")
 
 corrplot(corr_matrix,
          method = "color",
@@ -362,13 +406,13 @@ In the summary of coefficients reports the average over the evaluated models wei
 
 so we can say that
 
-- Age has a positive effect and high PIP: older passengers have higher probability of satisfaction; the same goes for `Seat.Comfort`, as expected
+- `Seat.Comfort`: positive effect and high PIP, as expected
 
-- `Arrival.Delay` has a negative effect (as expected) and discrete PIP, so there is some uncertainty in whether this predictor is actually important.
+- `ClassEco` and `ClassEco Plus`: they have negative effect (more likely to be dissatisfied when not in business class) and high PIP
 
-- `Departure.Delay` has almost 0 mean and very poor PIP, this is probably due to the fact that once `Arrival.Delay` is included, `Departure.Delay` adds little information.
+- `Arrival.Delay` and `Departure.Delay` have a negative effect (as expected) but a low PIP, however this is probably due to the veeery strong correlation between the two, so they split the PIP in two.
 
-- `Flight.Distance`: same as for `Departure.Delay`, this is probably irrelevant because people know the flight length in advance.
+- `Age`: poor PIP and a small coefficient, even if zero isn't in the 95% interval.
 
 In the graph of the residuals the x is the prediction in the log-odds scale (I assume / ChatGPT says). I have to admit that i really can't understand that residual plot tho: when our model predicts log-odds = 0 (thus p(satisfied) = 0.5), we observe some residuals that are 0, which is impossible, any observations would either have satisfied = 0 or = 1, in both cases our prediction had a residual of 0.5. The same goes for residuals greater than 1. So maybe even the y is in the log-odds scale? but this still doesn't make sense, consider the right side, i guess (ChatGPT says) that the two lines correspond to the two values satisfaction can assume, then when we predict 2 (p = 0.88), we have a residual of -2 for one class and -1 for the other, this means that we should have predicted 4 or 3 (to be exact for one class) (or equivalently predict 0 and 1) , but this means making a prediction where we are more strongly convinced that satisfaction = 1 (or = 0 equivalently) for both classes =\> contradiction... i just don't know how to read it and ChatGPT isn't helping.
 
@@ -404,7 +448,7 @@ Much slower but gives a better R2, however there are some weird things. We can e
 
 This still has a better R2 (not that it was hard to be better than the previous model), but i still struggle to understand the residual plot.
 
-```{r fig.width=10, fig.height=10}
+```{r fig.width=8, fig.height=8}
 
 table_cat <- table_enc %>%
   mutate(across(c(Seat.Comfort), as.factor))
@@ -463,7 +507,8 @@ image(fit_full, rotate = FALSE)
 ```{r}
 pip_full <- data.frame(
   variable = fit_full$namesx,
-  PIP      = fit_full$probne0
+  PIP      = fit_full$probne0,
+  coeff    = coef(fit_full)$postmean
 )
 pip_full <- pip_full[order(pip_full$PIP, decreasing = TRUE), ]
 pip_full
@@ -520,7 +565,9 @@ par(mfrow = c(1, 1))
 
 **Interpretation of PIP and coefficients:**
 
-BMA results, based on the top 1687 visited models, identify three groups of variables.
+BMA results, based on the top 2148 visited models, identify three groups of variables.
+
+NOTE: the following depend heavily on the train-test split (in fact they are not up to date, just refer to the PIP table above), can we TODO sth about this variability? like stratification
 
 **Strong drivers (PIP \> 0.95):** `Inflight.Entertainment` (+0.858), `Customer.TypeLoyal` (+2.306), `Ease.of.Online.Booking` (+0.455), `On.Board.Service` (+0.293), `Seat.Comfort` (+0.374) and `Checkin` (+0.214) all have positive effects, while `ClassEco` (−0.887), `Type.of.TravelPersonal` (−0.944) and `Departure.Arrival.Time.Convenient` (−0.222) are negative. All their credible intervals exclude or just touch zero. Notably, loyal customers show the largest effect by far (+2.306), and economy class passengers are the most penalised group (−0.887).
 
@@ -530,6 +577,8 @@ BMA results, based on the top 1687 visited models, identify three groups of vari
 
 # Variable Selection
 
+In principle we could use the HPM as a form of variable selection, however it can be very unstable (as always due to the presence of correlated predictors), since it does not account for the model uncertainty, unless `PostProb` is concentrated in one model.
+
 ## PIP Threshold
 
 Starting from the full model we see that many variables have low PIP, this confirms our belief that many predictors captured redundant information (e.g. `Arrival.Delay` is a consequence of `Departure.Delay`).
@@ -538,23 +587,30 @@ We can start by fitting a simpler model where we consider only the variables wit
 
 Notice that
 
-- in this selection we consider separately the dummy variables for categorical predictors =\> in the model I must use the original variable.
+- the PIP threshold might separate the dummy variables for categorical predictors =\> in the model I must use the original variable
 
 - now all predictors have high PIP, even those that had PIP slightly above the threshold in the full model, this is due to the removal of the correlated predictors that shared part of the PIP.
 
 - the model is now small enough to train it without MCMC
 
+- only one model (the one with all predictors) has a high `PostProb`, meaning that the predictions will be heavily influenced by that single model, but it's not that strong to state that there is no model uncertainty
+
 ```{r fig.width=8, fig.height=8}
+
+# TODO: try other thresholds? 
+#       maybe by looking at the sorted list of pip seeing if we missed sth important (that's not correlated to what we have selected)
+#       or included sth useless
 
 vars_th <- pip_full$variable[pip_full$PIP > 0.5]
 vars_th <- setdiff(vars_th, "Intercept")
 cat("Selected using PIP threshold: ", vars_th, "\n")
 
+# TODO: automate the model construction, for the cat variables we should do sth like if (vars_th[i].starts_with(cat_vars[j for some j])) then use cat_vars[j]
+
 fit_th <- bas.glm(
   Satisfaction ~
-    Customer.Type + Inflight.Entertainment + Ease.of.Online.Booking + Class + Seat.Comfort + On.Board.Service +
-    Type.of.Travel + Departure.Arrival.Time.Convenient + Checkin + Arrival.Delay + Flight.Distance + Food.and.Drink +
-    Age + Online.Support,
+    Customer.Type + Inflight.Entertainment + Ease.of.Online.Booking + Class +
+    Seat.Comfort + On.Board.Service + Type.of.Travel + Arrival.Delay + Food.and.Drink,
   data = table_enc, family = binomial()
 )
 
@@ -575,24 +631,30 @@ par(mfrow = c(1, 1))
 plot(confint(coef(fit_th)), main="coeff confidence intervals")
 ```
 
-This approach is simple, however we should compare carefully it's performance compared to the full model, because we have many strongly correlated predictors, so PIP might be split among them (e.g. one predictor could have PIP = 0.9, but the presence of a second predictor that captures the same information yields both PIP = 0.45).
+This approach is simple, however we should compare carefully it's performance compared to the full model, because we have many strongly correlated predictors, so PIP might be split among them (e.g. one predictor could have PIP = 0.9, but the presence of a second predictor that captures the same information yields both PIP = 0.45). This means that we might have removed the predictors that captured that information, losing it.
 
 For this reason we might want to manually choose a subset of the predictors excluding those that are strongly correlated to the selected ones and fit such a model.
 
-In practice we can also use the HPM as a form of variable selection, however it can be very unstable (as always due to the presence of correlated predictors), since it does not account for the model uncertainty, unless `PostProb` is concentrated in one model.
-
 ## Manual Selection
 
-The following variables have been chosen based mostly on the box-plots, picking the variables that show the most clear division between satisfied and dissatisfied customers, but also based on the correlation matrix, trying to pick two strongly correlated variables.
+The following variables have been chosen based on
 
-The decision was made also based on the knowledge of the problem: a loyal customer is more likely to be satisfied otherwise he wouldn't be loyal in the first place, delays sure lower the satisfaction and so on...
+- the box-plots, picking the variables that show the most clear division between satisfied and dissatisfied customers,
+
+- the correlation matrix, trying not to pick two strongly correlated variables.
+
+- the knowledge of the problem: a loyal customer is more likely to be satisfied otherwise he wouldn't be loyal in the first place, delays sure lower the satisfaction and so on...
 
 We see that overall the model is very simple and the best model obtained (that includes all the selected variables) has a much better `R2` compared to the suggested model. Being the `PostProb` all concentrated in one model means that BMA is kinda pointless in this case, all the other models obtained (each excluding a useful variable) have almost 0 weight. However this doesn't mean that we found the correct model, it just means that among all the models that contain the selected variables, we are sure that that's the "more adequate" one. So, when making predictions we can just use the HPM.
+
+Now, this model isn't much simpler than the threshold one (just 1 less variable) (and not very different either) so we might leave this just as "sth we tested" or make it even simpler and see how it goes (but i wouldn't know what to remove, it already seems the bare minimum to make a decision about satisfaction).
 
 ```{r fig.width=8, fig.height=8}
 
 fit_man <- bas.glm(
-  Satisfaction ~ Customer.Type + Arrival.Delay + Inflight.Entertainment + Online.Boarding + Cleanliness + Class + Type.of.Travel + Seat.Comfort,
+  Satisfaction ~
+    Customer.Type + Arrival.Delay + Inflight.Entertainment + Online.Boarding +
+    Cleanliness + Class + Type.of.Travel + Seat.Comfort,
   data = table_enc, family = binomial()
 )
 
@@ -638,53 +700,18 @@ Given the correlation matrix we see that the members of the first cluster are al
 
 In this section we evaluate the predictive performance of the Bayesian logistic regression model. We split the dataset into a **learning set** (used to fit the model) and a **test set** (held out for prediction).
 
-We use the first `n_test` observations as the test set and the remaining ones as the learning set. This way the split is fully reproducible without relying on random sampling.
-
-```{r}
-# to make it random
-set.seed(42)
-idx <- sample(nrow(table_enc))
-newdata      <- table_enc[idx[1:400], ]
-datalearning <- table_enc[idx[401:nrow(table_enc)], ]
-
-#n_test    <- 400
-#n_total   <- nrow(table_enc)
-#n_learn   <- n_total - n_test
-
-#newdata      <- table_enc[1:n_test, ]
-#datalearning <- table_enc[(n_test + 1):n_total, ]
-
-rownames(datalearning) <- seq_len(nrow(datalearning))
-rownames(newdata)      <- seq_len(nrow(newdata))
-
-cat("Learning set size:", n_learn, "\n")
-cat("Test set size:    ", n_test,  "\n")
-```
-
-We refit the full Bayesian logistic regression model on `datalearning` only, using MCMC to explore the model space. The test set `newdata` is never used during estimation.
-
-```{r}
-fit_pred <- bas.glm(
-  Satisfaction ~ . - Satisfaction - X,
-  data            = datalearning,
-  family          = binomial(),
-  method          = "MCMC",
-  MCMC.iterations = 10000
-)
-```
-
 ## Fitted values vs true values on the learning set
 
 We first obtain the fitted probabilities on the learning set (in-sample) and convert them to predicted classes using a 0.5 threshold, to get a baseline picture of how the model behaves on the data it was trained on.
 
 ```{r}
-fitted_learn <- predict(fit_pred, estimator = "BMA")
+fitted_learn <- predict(fit_full, estimator = "BMA")
 prob_learn   <- fitted_learn$fit
 
 pred_learn <- ifelse(prob_learn >= 0.5, "Satisfied", "Dissatisfied")
-pred_learn <- factor(pred_learn, levels = levels(datalearning$Satisfaction))
+pred_learn <- factor(pred_learn, levels = levels(table_enc$Satisfaction))
 
-acc_learn <- mean(pred_learn == datalearning$Satisfaction)
+acc_learn <- mean(pred_learn == table_enc$Satisfaction)
 cat("In-sample accuracy (learning set):", round(acc_learn, 4), "\n")
 ```
 
@@ -723,8 +750,8 @@ We now predict on `newdata`, i.e. the observations that were **not used to fit t
 - **HPM** (Highest Posterior Model): uses only the single model with the largest posterior probability.
 
 ```{r}
-pred_bma <- predict(fit_pred, newdata = newdata, estimator = "BMA")
-pred_hpm <- predict(fit_pred, newdata = newdata, estimator = "HPM")
+pred_bma <- predict(fit_full, newdata = test_enc, estimator = "BMA")
+pred_hpm <- predict(fit_full, newdata = test_enc, estimator = "HPM")
 
 prob_bma <- pred_bma$fit
 prob_hpm <- pred_hpm$fit
@@ -736,7 +763,7 @@ Below we plot the true response against the fitted and predicted probabilities. 
 # Combine in-sample and out-of-sample for a joint plot
 plot(
   prob_learn,
-  as.numeric(datalearning$Satisfaction) - 1,
+  as.numeric(table_enc$Satisfaction) - 1,
   pch  = 16,
   xlab = expression(hat(p)),
   ylab = "Observed (0 = Dissatisfied, 1 = Satisfied)",
@@ -744,7 +771,7 @@ plot(
 )
 points(
   prob_bma,
-  as.numeric(newdata$Satisfaction) - 1,
+  as.numeric(test_enc$Satisfaction) - 1,
   pch = 16,
   col = "red"
 )
@@ -768,7 +795,7 @@ The scatter plot below compares the predicted probabilities under BMA and HPM on
 pred_df <- data.frame(
   HPM    = as.numeric(prob_hpm),
   BMA    = as.numeric(prob_bma),
-  Actual = newdata$Satisfaction
+  Actual = test_enc$Satisfaction
 )
 
 ggplot(pred_df, aes(x = HPM, y = BMA, color = Actual)) +
@@ -802,15 +829,15 @@ We threshold the BMA and HPM probabilities at 0.5 and compare the resulting clas
 ```{r}
 # BMA classification
 class_bma <- ifelse(prob_bma >= 0.5, "Satisfied", "Dissatisfied")
-class_bma <- factor(class_bma, levels = levels(newdata$Satisfaction))
+class_bma <- factor(class_bma, levels = levels(test_enc$Satisfaction))
 
 # HPM classification
 class_hpm <- ifelse(prob_hpm >= 0.5, "Satisfied", "Dissatisfied")
-class_hpm <- factor(class_hpm, levels = levels(newdata$Satisfaction))
+class_hpm <- factor(class_hpm, levels = levels(test_enc$Satisfaction))
 
 # Accuracy
-acc_bma <- mean(class_bma == newdata$Satisfaction)
-acc_hpm <- mean(class_hpm == newdata$Satisfaction)
+acc_bma <- mean(class_bma == test_enc$Satisfaction)
+acc_hpm <- mean(class_hpm == test_enc$Satisfaction)
 
 cat("Out-of-sample accuracy — BMA:", round(acc_bma, 4), "\n")
 cat("Out-of-sample accuracy — HPM:", round(acc_hpm, 4), "\n")
@@ -818,8 +845,8 @@ cat("Out-of-sample accuracy — HPM:", round(acc_hpm, 4), "\n")
 
 ```{r}
 # Confusion matrices
-conf_bma <- table(Predicted = class_bma, Actual = newdata$Satisfaction)
-conf_hpm <- table(Predicted = class_hpm, Actual = newdata$Satisfaction)
+conf_bma <- table(Predicted = class_bma, Actual = test_enc$Satisfaction)
+conf_hpm <- table(Predicted = class_hpm, Actual = test_enc$Satisfaction)
 
 cat("\nConfusion matrix — BMA:\n")
 print(conf_bma)
