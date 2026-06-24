@@ -426,3 +426,293 @@ par(mfrow = c(1, 1))
 
 plot(confint(coef(fit)),main="coeff confidence intervals")
 ```
+
+# **Variable selection**
+
+The initial model used only 6 predictors. We now extend the analysis to all available covariates to identify which variables are most strongly associated with customer satisfaction.
+
+With 21 predictors the full model space ($2^{21}$) is too large to enumerate exactly. `bas.glm` uses MCMC sampling over the model space, visiting models proportionally to their posterior probability.
+
+```{r}
+fit_full <- bas.glm(
+  Satisfaction ~ . - Satisfaction,
+  data            = table_enc,
+  family          = binomial(),
+  method          = "MCMC",
+  MCMC.iterations = 10000
+)
+
+# ?? i don't know if we need to add:  prior = "BIC" 
+
+round(summary(fit_full), 3)
+```
+
+**Image plot** : each column is one of the top-visited models (ranked by posterior probability); each row is a predictor. A coloured cell means the predictor is included in that model. Variables that appear coloured across almost all columns have high posterior inclusion probability and are consistently selected.
+
+```{r}
+image(fit_full, rotate = FALSE)
+
+```
+**Posterior Inclusion Probabilities (PIPs)**: we extract and rank the PIPs to identify the most important predictors:
+
+```{r}
+pip <- data.frame(
+  variable = fit_full$namesx,
+  PIP      = fit_full$probne0
+)
+pip <- pip[order(pip$PIP, decreasing = TRUE), ]
+pip
+```
+Variables with PIP close to 1 are consistently selected across nearly all visited models and should be considered the key drivers of satisfaction.
+
+**Highest Posterior Model (HPM)**
+
+```{r}
+# Index of the model with larger log-likehood 
+best_idx <- which.max(fit_full$logmarg)
+
+# Considered variable
+selected_vars <- fit_full$which[[best_idx]]
+cat("Variables in the model HPM (indexes):", selected_vars, "\n")
+cat("Name:", fit_full$namesx[selected_vars + 1], "\n")
+
+# Posterior probability of the model HPM vs runner-up
+pp_sorted <- sort(fit_full$postprobs, decreasing = TRUE)
+cat("\nPosterior probability HPM:     ", round(pp_sorted[1], 4), "\n")
+cat("Posterior probability runner-up:", round(pp_sorted[2], 4), "\n")
+```**Coefficient estimates under BMA:**
+
+```{r}
+coef_full <- coef(fit_full, estimator = "BMA")
+coef_full
+print("--------------------------------------------", quote = FALSE)
+confint(coef_full)
+```
+```{r fig.width=12, fig.height=10}
+par(mfrow = c(4, 4))
+plot(coef_full, ask = FALSE)
+par(mfrow = c(1, 1))
+```
+```{r}
+plot(confint(coef_full), main = "BMA — 95% credible intervals for coefficients")
+
+```
+**BMA vs HPM: confronto delle previsioni in-sample**
+
+```{r}
+pred_bma <- predict(fit_full, estimator = "BMA")
+pred_hpm <- predict(fit_full, estimator = "HPM")
+
+prob_bma <- as.numeric(pred_bma$fit)
+prob_hpm <- as.numeric(pred_hpm$fit)
+
+pred_df <- data.frame(
+  BMA    = prob_bma,
+  HPM    = prob_hpm,
+  Actual = table_enc$Satisfaction
+)
+
+ggplot(pred_df, aes(x = HPM, y = BMA, color = Actual)) +
+  geom_point(alpha = 0.4, size = 1.2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(
+    values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")
+  ) +
+  xlab("HPM predicted P(Satisfied)") +
+  ylab("BMA predicted P(Satisfied)") +
+  ggtitle("BMA vs HPM predictions") +
+  theme_bw()
+```
+
+**Interpretation of PIP and coefficients:**
+
+BMA results, based on the top 1687 visited models, identify three groups of variables.
+
+**Strong drivers (PIP \> 0.95):** `Inflight.Entertainment` (+0.858), `Customer.TypeLoyal` (+2.306), `Ease.of.Online.Booking` (+0.455), `On.Board.Service` (+0.293), `Seat.Comfort` (+0.374) and `Checkin` (+0.214) all have positive effects, while `ClassEco` (−0.887), `Type.of.TravelPersonal` (−0.944) and `Departure.Arrival.Time.Convenient` (−0.222) are negative. All their credible intervals exclude or just touch zero. Notably, loyal customers show the largest effect by far (+2.306), and economy class passengers are the most penalised group (−0.887).
+
+**Moderate evidence (0.5 \< PIP \< 0.95):** `Arrival.Delay` (−0.386), `Food.and.Drink` (−0.210), `Flight.Distance` (−0.190), `ClassEco Plus` (−0.677) and `Age` (−0.141) show some signal but with wider credible intervals that include zero, so their contribution is uncertain once the stronger predictors are in the model.
+
+**Weak or redundant (PIP \< 0.5):** `Gate.Location`, `Inflight.WiFi`, `Leg.Room`, `Cleanliness`, `Online.Boarding`, `Baggage.Handling` and `Departure.Delay` are selected in fewer than half the visited models and their posterior means are close to zero. Notably, `Departure.Delay` (post mean = −0.002) is nearly entirely absorbed by `Arrival.Delay` once both are included.
+
+# **Predictive exercise**
+
+In this section we evaluate the predictive performance of the Bayesian logistic regression model. We split the dataset into a **learning set** (used to fit the model) and a **test set** (held out for prediction).
+
+We use the first `n_test` observations as the test set and the remaining ones as the learning set. This way the split is fully reproducible without relying on random sampling.
+
+```{r}
+# to make it random
+set.seed(42)
+idx <- sample(nrow(table_enc))
+newdata      <- table_enc[idx[1:400], ]
+datalearning <- table_enc[idx[401:nrow(table_enc)], ]
+
+#n_test    <- 400
+#n_total   <- nrow(table_enc)
+#n_learn   <- n_total - n_test
+
+#newdata      <- table_enc[1:n_test, ]
+#datalearning <- table_enc[(n_test + 1):n_total, ]
+
+rownames(datalearning) <- seq_len(nrow(datalearning))
+rownames(newdata)      <- seq_len(nrow(newdata))
+
+cat("Learning set size:", n_learn, "\n")
+cat("Test set size:    ", n_test,  "\n")
+```
+
+We refit the full Bayesian logistic regression model on `datalearning` only, using MCMC to explore the model space. The test set `newdata` is never used during estimation.
+
+```{r}
+fit_pred <- bas.glm(
+  Satisfaction ~ . - Satisfaction,
+  data            = datalearning,
+  family          = binomial(),
+  method          = "MCMC",
+  MCMC.iterations = 10000
+)
+```
+
+## Fitted values vs true values on the learning set
+
+We first obtain the fitted probabilities on the learning set (in-sample) and convert them to predicted classes using a 0.5 threshold, to get a baseline picture of how the model behaves on the data it was trained on.
+
+```{r}
+fitted_learn <- predict(fit_pred, estimator = "BMA")
+prob_learn   <- fitted_learn$fit
+
+pred_learn <- ifelse(prob_learn >= 0.5, "Satisfied", "Dissatisfied")
+pred_learn <- factor(pred_learn, levels = levels(datalearning$Satisfaction))
+
+acc_learn <- mean(pred_learn == datalearning$Satisfaction)
+cat("In-sample accuracy (learning set):", round(acc_learn, 4), "\n")
+```
+
+## Out-of-sample predictions
+We now predict on `newdata`, i.e. the observations that were **not used to fit the model**. We obtain predictions under two estimators:
+
+- **BMA** (Bayesian Model Averaging): averages predictions across all visited models, weighted by their posterior probability;
+- **HPM** (Highest Posterior Model): uses only the single model with the largest posterior probability.
+
+```{r}
+pred_bma <- predict(fit_pred, newdata = newdata, estimator = "BMA")
+pred_hpm <- predict(fit_pred, newdata = newdata, estimator = "HPM")
+
+prob_bma <- pred_bma$fit
+prob_hpm <- pred_hpm$fit
+```
+
+Below we plot the true response against the fitted and predicted probabilities. Black points are **in-sample** (learning set) and red points are **out-of-sample** (test set). A good model should show comparable spread between the two groups.
+
+```{r}
+# Combine in-sample and out-of-sample for a joint plot
+plot(
+  prob_learn,
+  as.numeric(datalearning$Satisfaction) - 1,
+  pch  = 16,
+  xlab = expression(hat(p)),
+  ylab = "Observed (0 = Dissatisfied, 1 = Satisfied)",
+  main = "Fitted (black) vs predicted (red) probabilities"
+)
+points(
+  prob_bma,
+  as.numeric(newdata$Satisfaction) - 1,
+  pch = 16,
+  col = "red"
+)
+abline(v = 0.5, lty = 2, col = "gray50")
+
+```
+- The model is well-separated: most predictions are concentrated near$\hat{p}$​≈0 or $\hat{p}$​≈1, meaning the model is generally confident in its classifications rather than uncertain around 0.5. This is a sign that the selected predictors carry strong discriminative information.
+
+- The 0.5 threshold works well: points on y = 1 are predominantly on the right of the dashed line, and points on y = 0 are predominantly on the left, confirming that the 0.5 cutoff correctly separates the two classes in most cases.
+
+- Misclassified observations are those where y = 1 but $\hat{p}$​\<0.5 (satisfied customers predicted as dissatisfied, visible on the left side of the y = 1 line) and vice versa. These are relatively few, consistent with the accuracy we computed.
+
+- Red and black points overlap closely, indicating that the model generalises well from the learning set to the test set, with no obvious signs of overfitting.
+
+## BMA vs HPM: comparison of predicted probabilities
+
+The scatter plot below compares the predicted probabilities under BMA and HPM on the test set. Points on the 45-degree dashed line indicate identical predictions; deviations show where the two estimators disagree. BMA predictions tend to be slightly more conservative (pulled toward 0.5) because they average over models rather than committing to a single one.
+```{r}
+pred_df <- data.frame(
+  HPM    = as.numeric(prob_hpm),
+  BMA    = as.numeric(prob_bma),
+  Actual = newdata$Satisfaction
+)
+
+ggplot(pred_df, aes(x = HPM, y = BMA, color = Actual)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(
+    values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")
+  ) +
+  labs(
+    title = "Out-of-sample predicted probabilities: BMA vs HPM",
+    x     = "HPM predicted P(Satisfied)",
+    y     = "BMA predicted P(Satisfied)"
+  ) +
+  theme_bw()
+```
+The plot compares the predicted probabilities of the two estimators on the test set, with points coloured by the true class.
+
+- **BMA and HPM agree closely**: almost all points lie very near the 45-degree dashed line, meaning the two estimators produce nearly identical predictions in this dataset. This is a reassuring sign: the data are informative enough that the posterior is concentrated around a single dominant model, so averaging across models (BMA) or picking the best one (HPM) leads to the same conclusion.
+
+- **BMA is slightly more conservative than HPM**: points tend to fall marginally *above* the diagonal for low predicted probabilities and *below* for high ones. In other words, BMA pulls predictions slightly toward 0.5 compared to HPM. This is the expected behaviour: BMA averages over models of varying complexity, and the simpler models included in the average shrink predictions toward the prior, while HPM commits fully to the single most probable model.
+
+- **The two classes are well separated**: green points (Satisfied) cluster in the upper-right region ( $\hat{p}$​ close to 1 for both estimators) and red points (Dissatisfied) cluster in the lower-left ( $\hat{p}$​ close to 0). The overlap between the two colours is limited, confirming the good discriminative ability of the model already observed in the previous plot.
+
+- **Most disagreement between BMA and HPM occurs in the intermediate range** ( $\hat{p}$​​≈0.25–0.60), which is exactly where model uncertainty matters most. Outside this range the predictions are nearly identical, because a predicted probability close to 0 or 1 is robust to which model is selected.
+
+## Classification performance on the test set
+
+We threshold the BMA and HPM probabilities at 0.5 and compare the resulting classifications with the true labels.
+
+```{r}
+# BMA classification
+class_bma <- ifelse(prob_bma >= 0.5, "Satisfied", "Dissatisfied")
+class_bma <- factor(class_bma, levels = levels(newdata$Satisfaction))
+
+# HPM classification
+class_hpm <- ifelse(prob_hpm >= 0.5, "Satisfied", "Dissatisfied")
+class_hpm <- factor(class_hpm, levels = levels(newdata$Satisfaction))
+
+# Accuracy
+acc_bma <- mean(class_bma == newdata$Satisfaction)
+acc_hpm <- mean(class_hpm == newdata$Satisfaction)
+
+cat("Out-of-sample accuracy — BMA:", round(acc_bma, 4), "\n")
+cat("Out-of-sample accuracy — HPM:", round(acc_hpm, 4), "\n")
+```
+```{r}
+# Confusion matrices
+conf_bma <- table(Predicted = class_bma, Actual = newdata$Satisfaction)
+conf_hpm <- table(Predicted = class_hpm, Actual = newdata$Satisfaction)
+
+cat("\nConfusion matrix — BMA:\n")
+print(conf_bma)
+
+cat("\nConfusion matrix — HPM:\n")
+print(conf_hpm)
+```
+```{r}
+# Sensitivity and specificity for BMA
+sens_bma <- conf_bma["Satisfied",    "Satisfied"]    / sum(conf_bma[, "Satisfied"])
+spec_bma <- conf_bma["Dissatisfied", "Dissatisfied"] / sum(conf_bma[, "Dissatisfied"])
+
+cat("BMA — Sensitivity (Satisfied correctly identified):   ", round(sens_bma, 4), "\n")
+cat("BMA — Specificity (Dissatisfied correctly identified):", round(spec_bma, 4), "\n")
+```
+The out-of-sample results confirm that both estimators generalise well to unseen data, with BMA outperforming HPM slightly.
+
+**BMA achieves an accuracy of 85.50%**, correctly classifying 342 out of 400 test observations. **HPM achieves 84.00%**, correctly classifying 336 out of 400. The gap is modest but consistent with the theoretical expectation: by averaging over models rather than committing to one, BMA absorbs model uncertainty and produces more robust predictions.
+
+Looking at the confusion matrices in detail:
+
+- Under **BMA**, 152 dissatisfied customers are correctly identified and 190 satisfied ones are correctly identified. The errors are 26 false positives (dissatisfied predicted as satisfied) and 32 false negatives (satisfied predicted as dissatisfied), roughly balanced between the two types of error.
+
+- Under **HPM**, the picture is very similar: 148 and 188 correct classifications respectively, with 30 false positives and 34 false negatives. HPM makes slightly more false positive errors than BMA (30 vs 26), which explains most of the accuracy gap.
+
+- The **sensitivity of BMA is 0.8559**, meaning that 85.59% of truly satisfied customers are correctly identified. The **specificity is 0.8539**, meaning that 85.39% of truly dissatisfied customers are correctly identified. The two metrics are very close to each other, which indicates that the model is **well-balanced**: it does not systematically favour one class over the other, a desirable property when both types of misclassification carry comparable costs.
+
+Overall, an accuracy above 80% with balanced sensitivity and specificity on held-out data, using a model estimated purely on Bayesian principles with no manual tuning of the decision threshold, is a strong result and confirms that the selected predictors carry genuine and replicable signal about passenger satisfaction.
