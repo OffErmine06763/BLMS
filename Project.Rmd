@@ -13,6 +13,7 @@ library(dplyr)
 library(GGally)
 library(corrplot)
 library(BAS)
+library(pROC)
 ```
 
 # Initial Exploration of the Data
@@ -877,3 +878,46 @@ Looking at the confusion matrices in detail:
 - The **sensitivity of BMA is 0.8559**, meaning that 85.59% of truly satisfied customers are correctly identified. The **specificity is 0.8539**, meaning that 85.39% of truly dissatisfied customers are correctly identified. The two metrics are very close to each other, which indicates that the model is **well-balanced**: it does not systematically favour one class over the other, a desirable property when both types of misclassification carry comparable costs.
 
 Overall, an accuracy above 80% with balanced sensitivity and specificity on held-out data, using a model estimated purely on Bayesian principles with no manual tuning of the decision threshold, is a strong result and confirms that the selected predictors carry genuine and replicable signal about passenger satisfaction.
+
+## AUC
+
+The **Area Under the ROC Curve (AUC)** evaluates the model's discriminative ability across *all possible classification thresholds*, not just the 0.5 cutoff used for accuracy. The ROC curve plots sensitivity (true positive rate) against 1 − specificity (false positive rate) as the threshold varies from 0 to 1. An AUC of 0.5 corresponds to a random classifier, while an AUC of 1 indicates perfect separation between the two classes.
+
+```{r}
+# AUC — BMA
+roc_bma <- roc(
+  response  = as.numeric(test_enc$Satisfaction) - 1,
+  predictor = as.numeric(prob_bma)
+)
+auc_bma <- auc(roc_bma)
+
+# AUC — HPM
+roc_hpm <- roc(
+  response  = as.numeric(test_enc$Satisfaction) - 1,
+  predictor = as.numeric(prob_hpm)
+)
+auc_hpm <- auc(roc_hpm)
+
+cat("BMA — AUC:", round(auc_bma, 4), "\n")
+cat("HPM — AUC:", round(auc_hpm, 4), "\n")
+```
+
+Both estimators achieve excellent discriminative performance. BMA reaches an AUC of **0.9134** and HPM of **0.9059**, both well above 0.9, a threshold commonly used to indicate *outstanding* classification ability.
+
+```{r}
+# ROC curve plot
+plot(roc_bma, col = "steelblue", lwd = 2,
+     main = "ROC curves — BMA vs HPM (test set)")
+lines(roc_hpm, col = "darkorange", lwd = 2, lty = 2)
+legend("bottomright",
+       legend = c(
+         paste0("BMA"),
+         paste0("HPM")
+       ),
+       col = c("steelblue", "darkorange"),
+       lwd = 2, lty = c(1, 2))
+```
+
+The ROC curves confirm this: they rise steeply toward the upper-left corner of the plot, meaning the model achieves high sensitivity while keeping the false positive rate low, across virtually every threshold. This is consistent with the well-separated predicted probability distributions observed earlier.
+
+The gap between BMA and HPM is small (0.0075), but BMA consistently outperforms HPM both in AUC and in accuracy (85.50% vs 84.00%). This is the expected theoretical behaviour: by averaging predictions across all visited models weighted by their posterior probability, BMA absorbs model uncertainty and produces more robust, better-calibrated probabilities than committing to a single model as HPM does.
