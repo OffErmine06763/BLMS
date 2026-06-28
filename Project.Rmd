@@ -455,7 +455,7 @@ table_cat <- table_enc %>%
 
 fit_cat <- bas.glm(
   Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
-  data = table_bas, family = binomial()
+  data = table_cat, family = binomial()
 )
 
 summary(fit_cat)
@@ -700,61 +700,127 @@ Given the correlation matrix we see that the members of the first cluster are al
 
 In this section we evaluate the predictive performance of the Bayesian logistic regression model. We split the dataset into a **learning set** (used to fit the model) and a **test set** (held out for prediction).
 
-## Fitted values vs true values on the learning set
+First define some useful functions since we have to evaluate multiple models
+
+```{r}
+
+# compute metrics such as accuracy
+# - pred: output of "predict(model, ...)"
+# - threshold: predictions higher than "threshold" are considered "Satisfied"
+evaluate_performance <- function(pred, threshold, dataset) {
+  prob <- pred$fit
+
+  pred <- ifelse(prob >= threshold, "Satisfied", "Dissatisfied")
+  pred <- factor(pred, levels = levels(dataset$Satisfaction))
+  
+  acc <- mean(pred == dataset$Satisfaction)
+  conf <- table(Predicted = pred, Actual = dataset$Satisfaction)
+  
+  sens <- conf["Satisfied",    "Satisfied"]    / sum(conf[, "Satisfied"])
+  spec <- conf["Dissatisfied", "Dissatisfied"] / sum(conf[, "Dissatisfied"])
+
+  list(
+    accuracy = acc,
+    sensitivity = sens,
+    specificity = spec,
+    conf_mat = conf
+  )
+}
+
+# plot the predicted probabilities of two models
+# - pred_1, pred_2: output of two "predict(model, ...)" (they have to use the same prediction dataset)
+compare_predictions <- function(pred_1, pred_2, dataset, labelx = "Predictions 1", labely = "Predictions 2") {
+  prob_1 <- as.numeric(pred_1$fit)
+  prob_2 <- as.numeric(pred_2$fit)
+  
+  pred_df <- data.frame(
+    data_1 = prob_1,
+    data_2 = prob_2,
+    Actual = dataset$Satisfaction
+  )
+  
+  ggplot(pred_df, aes(x = data_1, y = data_2, color = Actual)) +
+    geom_point(alpha = 0.5, size = 1.5) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    scale_color_manual(
+      values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")
+    ) +
+    xlab(labelx) +
+    ylab(labely) +
+    ggtitle("Predictions Comparison") +
+    theme_bw()
+}
+
+# plot the predicted probabilities of BMA and HPM estimators of the same model
+compare_bma_hpc <- function(model, dataset) {
+  pred_bma <- predict(model, newdata = dataset, estimator = "BMA")
+  pred_hpm <- predict(model, newdata = dataset, estimator = "HPM")
+  compare_predictions(pred_hpm, pred_bma, dataset, "HPM predicted", "BMA predicted")
+}
+
+# Prints the perfromance metrics
+# - performance: the output of "evaluate_performance(...)"
+print_performance <- function(performance) {
+  cat("Accuracy:   ", round(performance$accuracy, 4), "\n")
+  cat("Sensitivity:", round(performance$sensitivity, 4), "(Satisfied correctly identified)\n")
+  cat("Specificity:", round(performance$specificity, 4), "(Dissatisfied correctly identified)\n")
+  
+  cat("\nConfusion matrix:\n")
+  print(performance$conf_mat)
+}
+
+print_performances <- function(perf_1, perf_2, name_1 = "Model 1", name_2 = "Model 2") {
+  cat(sprintf("             %-6s %-6s\n", name_1, name_2))
+  cat("Accuracy:   ", round(perf_1$accuracy, 4), round(perf_2$accuracy, 4), "\n")
+  cat("Sensitivity:", round(perf_1$sensitivity, 4), round(perf_2$sensitivity, 4), "(Satisfied correctly identified)\n")
+  cat("Specificity:", round(perf_1$specificity, 4), round(perf_2$specificity, 4), "(Dissatisfied correctly identified)\n")
+  
+  cat("\nConfusion Matrix ", name_1, ":\n", sep = "")
+  print(perf_1$conf_mat)
+  cat("\nConfusion Matrix ", name_2, ":\n", sep = "")
+  print(perf_2$conf_mat)
+}
+```
+
+## Full Model
+
+### Predict Learning Set
 
 We first obtain the fitted probabilities on the learning set (in-sample) and convert them to predicted classes using a 0.5 threshold, to get a baseline picture of how the model behaves on the data it was trained on.
 
 ```{r}
-fitted_learn <- predict(fit_full, estimator = "BMA")
-prob_learn   <- fitted_learn$fit
+train_full_bma_pred <- predict(fit_full, estimator = "BMA")
+train_full_hpm_pred <- predict(fit_full, estimator = "HPM")
+train_full_bma_prob <- train_full_bma_pred$fit
+```
 
-pred_learn <- ifelse(prob_learn >= 0.5, "Satisfied", "Dissatisfied")
-pred_learn <- factor(pred_learn, levels = levels(table_enc$Satisfaction))
+```{r}
+train_full_bma_perf <- evaluate_performance(train_full_bma_pred, 0.5, table_enc)
+train_full_hpm_perf <- evaluate_performance(train_full_hpm_pred, 0.5, table_enc)
 
-acc_learn <- mean(pred_learn == table_enc$Satisfaction)
-cat("In-sample accuracy (learning set):", round(acc_learn, 4), "\n")
+cat("Train set performance, BMA vs HPM:\n")
+print_performances(train_full_bma_perf, train_full_hpm_perf, "BMA", "HPM")
 ```
 
 **BMA vs HPM**
 
 ```{r}
-pred_bma <- predict(fit_full, estimator = "BMA")
-pred_hpm <- predict(fit_full, estimator = "HPM")
-
-prob_bma <- as.numeric(pred_bma$fit)
-prob_hpm <- as.numeric(pred_hpm$fit)
-
-pred_df <- data.frame(
-  BMA    = prob_bma,
-  HPM    = prob_hpm,
-  Actual = table_enc$Satisfaction
-)
-
-ggplot(pred_df, aes(x = HPM, y = BMA, color = Actual)) +
-  geom_point(alpha = 0.4, size = 1.2) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  scale_color_manual(
-    values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")
-  ) +
-  xlab("HPM predicted P(Satisfied)") +
-  ylab("BMA predicted P(Satisfied)") +
-  ggtitle("BMA vs HPM predictions") +
-  theme_bw()
+compare_bma_hpc(fit_full, table_enc)
 ```
 
-## Out-of-sample predictions
+### Predict Test Set
 
-We now predict on `newdata`, i.e. the observations that were **not used to fit the model**. We obtain predictions under two estimators:
+We now predict on `test_enc`, i.e. the observations that were **not used to fit the model**. We obtain predictions under two estimators:
 
 - **BMA** (Bayesian Model Averaging): averages predictions across all visited models, weighted by their posterior probability;
 - **HPM** (Highest Posterior Model): uses only the single model with the largest posterior probability.
 
 ```{r}
-pred_bma <- predict(fit_full, newdata = test_enc, estimator = "BMA")
-pred_hpm <- predict(fit_full, newdata = test_enc, estimator = "HPM")
+test_full_bma_pred <- predict(fit_full, newdata = test_enc, estimator = "BMA")
+test_full_hpm_pred <- predict(fit_full, newdata = test_enc, estimator = "HPM")
 
-prob_bma <- pred_bma$fit
-prob_hpm <- pred_hpm$fit
+test_full_bma_prob <- test_full_bma_pred$fit
+test_full_hpm_prob <- test_full_hpm_pred$fit
 ```
 
 Below we plot the true response against the fitted and predicted probabilities. Black points are **in-sample** (learning set) and red points are **out-of-sample** (test set). A good model should show comparable spread between the two groups.
@@ -762,16 +828,16 @@ Below we plot the true response against the fitted and predicted probabilities. 
 ```{r}
 # Combine in-sample and out-of-sample for a joint plot
 plot(
-  prob_learn,
-  as.numeric(table_enc$Satisfaction) - 1,
+  train_full_bma_prob,
+  as.numeric(table_enc$Satisfaction) - 1.01,
   pch  = 16,
   xlab = expression(hat(p)),
   ylab = "Observed (0 = Dissatisfied, 1 = Satisfied)",
   main = "Fitted (black) vs predicted (red) probabilities"
 )
 points(
-  prob_bma,
-  as.numeric(test_enc$Satisfaction) - 1,
+  test_full_bma_prob,
+  as.numeric(test_enc$Satisfaction) - 0.99,
   pch = 16,
   col = "red"
 )
@@ -787,29 +853,12 @@ abline(v = 0.5, lty = 2, col = "gray50")
 
 - Red and black points overlap closely, indicating that the model generalises well from the learning set to the test set, with no obvious signs of overfitting.
 
-## BMA vs HPM: comparison of predicted probabilities
+**BMA vs HPM**
 
 The scatter plot below compares the predicted probabilities under BMA and HPM on the test set. Points on the 45-degree dashed line indicate identical predictions; deviations show where the two estimators disagree. BMA predictions tend to be slightly more conservative (pulled toward 0.5) because they average over models rather than committing to a single one.
 
 ```{r}
-pred_df <- data.frame(
-  HPM    = as.numeric(prob_hpm),
-  BMA    = as.numeric(prob_bma),
-  Actual = test_enc$Satisfaction
-)
-
-ggplot(pred_df, aes(x = HPM, y = BMA, color = Actual)) +
-  geom_point(alpha = 0.5, size = 1.5) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  scale_color_manual(
-    values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")
-  ) +
-  labs(
-    title = "Out-of-sample predicted probabilities: BMA vs HPM",
-    x     = "HPM predicted P(Satisfied)",
-    y     = "BMA predicted P(Satisfied)"
-  ) +
-  theme_bw()
+compare_bma_hpc(fit_full, test_enc)
 ```
 
 The plot compares the predicted probabilities of the two estimators on the test set, with points coloured by the true class.
@@ -822,46 +871,16 @@ The plot compares the predicted probabilities of the two estimators on the test 
 
 - **Most disagreement between BMA and HPM occurs in the intermediate range** ( $\hat{p}$​​≈0.25–0.60), which is exactly where model uncertainty matters most. Outside this range the predictions are nearly identical, because a predicted probability close to 0 or 1 is robust to which model is selected.
 
-## Classification performance on the test set
+**Classification Performance**
 
 We threshold the BMA and HPM probabilities at 0.5 and compare the resulting classifications with the true labels.
 
 ```{r}
-# BMA classification
-class_bma <- ifelse(prob_bma >= 0.5, "Satisfied", "Dissatisfied")
-class_bma <- factor(class_bma, levels = levels(test_enc$Satisfaction))
+test_full_bma_perf <- evaluate_performance(test_full_bma_pred, 0.5, test_enc)
+test_full_hpm_perf <- evaluate_performance(test_full_hpm_pred, 0.5, test_enc)
 
-# HPM classification
-class_hpm <- ifelse(prob_hpm >= 0.5, "Satisfied", "Dissatisfied")
-class_hpm <- factor(class_hpm, levels = levels(test_enc$Satisfaction))
-
-# Accuracy
-acc_bma <- mean(class_bma == test_enc$Satisfaction)
-acc_hpm <- mean(class_hpm == test_enc$Satisfaction)
-
-cat("Out-of-sample accuracy — BMA:", round(acc_bma, 4), "\n")
-cat("Out-of-sample accuracy — HPM:", round(acc_hpm, 4), "\n")
-```
-
-```{r}
-# Confusion matrices
-conf_bma <- table(Predicted = class_bma, Actual = test_enc$Satisfaction)
-conf_hpm <- table(Predicted = class_hpm, Actual = test_enc$Satisfaction)
-
-cat("\nConfusion matrix — BMA:\n")
-print(conf_bma)
-
-cat("\nConfusion matrix — HPM:\n")
-print(conf_hpm)
-```
-
-```{r}
-# Sensitivity and specificity for BMA
-sens_bma <- conf_bma["Satisfied",    "Satisfied"]    / sum(conf_bma[, "Satisfied"])
-spec_bma <- conf_bma["Dissatisfied", "Dissatisfied"] / sum(conf_bma[, "Dissatisfied"])
-
-cat("BMA — Sensitivity (Satisfied correctly identified):   ", round(sens_bma, 4), "\n")
-cat("BMA — Specificity (Dissatisfied correctly identified):", round(spec_bma, 4), "\n")
+cat("Test set performance, BMA vs HPM:\n")
+print_performances(test_full_bma_perf, test_full_hpm_perf, "BMA", "HPM")
 ```
 
 The out-of-sample results confirm that both estimators generalise well to unseen data, with BMA outperforming HPM slightly.
@@ -877,3 +896,213 @@ Looking at the confusion matrices in detail:
 - The **sensitivity of BMA is 0.8559**, meaning that 85.59% of truly satisfied customers are correctly identified. The **specificity is 0.8539**, meaning that 85.39% of truly dissatisfied customers are correctly identified. The two metrics are very close to each other, which indicates that the model is **well-balanced**: it does not systematically favour one class over the other, a desirable property when both types of misclassification carry comparable costs.
 
 Overall, an accuracy above 80% with balanced sensitivity and specificity on held-out data, using a model estimated purely on Bayesian principles with no manual tuning of the decision threshold, is a strong result and confirms that the selected predictors carry genuine and replicable signal about passenger satisfaction.
+
+## Initial Model
+
+### Predict Learning Set
+
+```{r}
+train_init_bma_pred <- predict(fit, estimator = "BMA")
+train_init_hpm_pred <- predict(fit, estimator = "HPM")
+train_init_bma_prob <- train_full_bma_pred$fit
+```
+
+```{r}
+train_init_bma_perf <- evaluate_performance(train_init_bma_pred, 0.5, table_enc)
+train_init_hpm_perf <- evaluate_performance(train_init_hpm_pred, 0.5, table_enc)
+
+cat("Train set performance, BMA vs HPM:\n")
+print_performances(train_init_bma_perf, train_init_hpm_perf, "BMA", "HPM")
+```
+
+**BMA vs HPM**
+
+```{r}
+compare_bma_hpc(fit, table_enc)
+```
+
+### Predict Test Set
+
+```{r}
+test_init_bma_pred <- predict(fit, newdata = test_enc, estimator = "BMA")
+test_init_hpm_pred <- predict(fit, newdata = test_enc, estimator = "HPM")
+
+test_init_bma_prob <- test_init_bma_pred$fit
+test_init_hpm_prob <- test_init_hpm_pred$fit
+```
+
+```{r}
+# Combine in-sample and out-of-sample for a joint plot
+plot(
+  train_init_bma_prob,
+  as.numeric(table_enc$Satisfaction) - 1.01,
+  pch  = 16,
+  xlab = expression(hat(p)),
+  ylab = "Observed (0 = Dissatisfied, 1 = Satisfied)",
+  main = "Fitted (black) vs predicted (red) probabilities"
+)
+points(
+  test_init_bma_prob,
+  as.numeric(test_enc$Satisfaction) - 0.99,
+  pch = 16,
+  col = "red"
+)
+abline(v = 0.5, lty = 2, col = "gray50")
+
+```
+
+**BMA vs HPM**
+
+```{r}
+compare_bma_hpc(fit, test_enc)
+```
+
+**Classification Performance**
+
+```{r}
+test_init_bma_perf <- evaluate_performance(test_init_bma_pred, 0.5, test_enc)
+test_init_hpm_perf <- evaluate_performance(test_init_hpm_pred, 0.5, test_enc)
+
+cat("Test set performance, BMA vs HPM:\n")
+print_performances(test_init_bma_perf, test_init_hpm_perf, "BMA", "HPM")
+```
+
+## Threshold Selection Model
+
+### Predict Learning Set
+
+```{r}
+train_th_bma_pred <- predict(fit_th, estimator = "BMA")
+train_th_hpm_pred <- predict(fit_th, estimator = "HPM")
+train_th_bma_prob <- train_full_bma_pred$fit
+```
+
+```{r}
+train_th_bma_perf <- evaluate_performance(train_th_bma_pred, 0.5, table_enc)
+train_th_hpm_perf <- evaluate_performance(train_th_hpm_pred, 0.5, table_enc)
+
+cat("Train set performance, BMA vs HPM:\n")
+print_performances(train_th_bma_perf, train_th_hpm_perf, "BMA", "HPM")
+```
+
+**BMA vs HPM**
+
+```{r}
+compare_bma_hpc(fit_th, table_enc)
+```
+
+### Predict Test Set
+
+```{r}
+test_th_bma_pred <- predict(fit_th, newdata = test_enc, estimator = "BMA")
+test_th_hpm_pred <- predict(fit_th, newdata = test_enc, estimator = "HPM")
+
+test_th_bma_prob <- test_th_bma_pred$fit
+test_th_hpm_prob <- test_th_hpm_pred$fit
+```
+
+```{r}
+# Combine in-sample and out-of-sample for a joint plot
+plot(
+  train_th_bma_prob,
+  as.numeric(table_enc$Satisfaction) - 1.01,
+  pch  = 16,
+  xlab = expression(hat(p)),
+  ylab = "Observed (0 = Dissatisfied, 1 = Satisfied)",
+  main = "Fitted (black) vs predicted (red) probabilities"
+)
+points(
+  test_th_bma_prob,
+  as.numeric(test_enc$Satisfaction) - 0.99,
+  pch = 16,
+  col = "red"
+)
+abline(v = 0.5, lty = 2, col = "gray50")
+
+```
+
+**BMA vs HPM**
+
+```{r}
+compare_bma_hpc(fit_th, test_enc)
+```
+
+**Classification Performance**
+
+```{r}
+test_th_bma_perf <- evaluate_performance(test_th_bma_pred, 0.5, test_enc)
+test_th_hpm_perf <- evaluate_performance(test_th_hpm_pred, 0.5, test_enc)
+
+cat("Test set performance, BMA vs HPM:\n")
+print_performances(test_th_bma_perf, test_th_hpm_perf, "BMA", "HPM")
+```
+
+## Manual Selection Model
+
+### Predict Learning Set
+
+```{r}
+train_man_bma_pred <- predict(fit_man, estimator = "BMA")
+train_man_hpm_pred <- predict(fit_man, estimator = "HPM")
+train_man_bma_prob <- train_full_bma_pred$fit
+```
+
+```{r}
+train_man_bma_perf <- evaluate_performance(train_man_bma_pred, 0.5, table_enc)
+train_man_hpm_perf <- evaluate_performance(train_man_hpm_pred, 0.5, table_enc)
+
+cat("Train set performance, BMA vs HPM:\n")
+print_performances(train_man_bma_perf, train_man_hpm_perf, "BMA", "HPM")
+```
+
+**BMA vs HPM**
+
+```{r}
+compare_bma_hpc(fit_man, table_enc)
+```
+
+### Predict Test Set
+
+```{r}
+test_man_bma_pred <- predict(fit_man, newdata = test_enc, estimator = "BMA")
+test_man_hpm_pred <- predict(fit_man, newdata = test_enc, estimator = "HPM")
+
+test_man_bma_prob <- test_man_bma_pred$fit
+test_man_hpm_prob <- test_man_hpm_pred$fit
+```
+
+```{r}
+# Combine in-sample and out-of-sample for a joint plot
+plot(
+  train_man_bma_prob,
+  as.numeric(table_enc$Satisfaction) - 1.01,
+  pch  = 16,
+  xlab = expression(hat(p)),
+  ylab = "Observed (0 = Dissatisfied, 1 = Satisfied)",
+  main = "Fitted (black) vs predicted (red) probabilities"
+)
+points(
+  test_man_bma_prob,
+  as.numeric(test_enc$Satisfaction) - 0.99,
+  pch = 16,
+  col = "red"
+)
+abline(v = 0.5, lty = 2, col = "gray50")
+
+```
+
+**BMA vs HPM**
+
+```{r}
+compare_bma_hpc(fit_man, test_enc)
+```
+
+**Classification Performance**
+
+```{r}
+test_man_bma_perf <- evaluate_performance(test_man_bma_pred, 0.5, test_enc)
+test_man_hpm_perf <- evaluate_performance(test_man_hpm_pred, 0.5, test_enc)
+
+cat("Test set performance, BMA vs HPM:\n")
+print_performances(test_man_bma_perf, test_man_hpm_perf, "BMA", "HPM")
+```
