@@ -13,6 +13,7 @@ library(dplyr)
 library(GGally)
 library(corrplot)
 library(BAS)
+library(pROC)
 ```
 
 # Initial Exploration of the Data
@@ -696,6 +697,56 @@ Given the correlation matrix we see that the members of the first cluster are al
 
 ?? Do we suspect interactions? like idk `Flight.Entertainment` is relevant only when in business class or the combo `Seat.Comfort` and `Leg.Room` is stronger than the two individual effects so we should multiply them or sth like that... I think we have a looot of pussybilities (cit) so we should focus on the phenomena that we suspect are happening given our knowledge of planes. I know a lot about them from the outside, but ive never taken one so lemme know.
 
+Motivation: Business class passengers have different expectations than Economy passengers. The effect of in-flight services on satisfaction may therefore depend on the travel class. We test two interactions: Class:Inflight.Entertainment and Class:Seat.Comfort
+
+```{r}
+fit_int <- bas.glm(
+  Satisfaction ~
+    Customer.Type + Inflight.Entertainment + Ease.of.Online.Booking + Class +
+    Seat.Comfort + On.Board.Service + Type.of.Travel + Arrival.Delay +
+    Class:Inflight.Entertainment + Class:Seat.Comfort,
+  data            = table_enc,
+  family          = binomial(),
+  method          = "MCMC",
+  MCMC.iterations = 10000
+)
+
+summary(fit_int)
+
+coef(fit_int)
+print("--------------------------------------------", quote = FALSE)
+confint(coef(fit_int))
+
+par(mfrow = c(2, 2))
+
+plot(fit_man, which = 1)
+plot(fit_man, which = 2)
+plot(fit_man, which = 3)
+plot(fit_man, which = 4)
+
+par(mfrow = c(1, 1))
+
+plot(confint(coef(fit_int)), main="coeff confidence intervals")
+```
+```{r}
+pip_int <- data.frame(
+  variable = fit_int$namesx,
+  PIP      = fit_int$probne0,
+  coeff    = coef(fit_int)$postmean
+)
+pip_int <- pip_int[order(pip_int$PIP, decreasing = TRUE), ]
+pip_int
+```
+The PIP table reveals a clear separation between main effects and interaction terms. The main effects `Customer.TypeLoyal` (PIP = 0.999), `Inflight.Entertainment` (PIP = 1.000), `Ease.of.Online.Booking` (PIP = 0.999), `On.Board.Service` (PIP = 0.958) and `Arrival.Delay` (PIP = 0.995) are selected in virtually every visited model, confirming the results already obtained in the full model without interactions.
+
+The interaction terms tell a more nuanced story. `Inflight.Entertainment:ClassEco` has a PIP of 0.656 and `Inflight.Entertainment:ClassEco Plus` of 0.527 — both above 0.5, suggesting moderate evidence that the effect of in-flight entertainment on satisfaction is not uniform across travel classes. Economy and Eco Plus passengers appear to respond differently to entertainment quality compared to Business class passengers, which is the reference category. By contrast, the `Seat.Comfort` interaction terms (`ClassEco:Seat.Comfort` PIP = 0.216, `ClassEco Plus:Seat.Comfort` PIP = 0.238) fall well below 0.5, indicating that the effect of seat comfort on satisfaction does not vary meaningfully across classes once the other predictors are accounted for.
+
+The coefficient plot confirms the PIP results. `Customer.TypeLoyal` and `Inflight.Entertainment` show large positive effects with credible intervals well above zero. `ClassEco` has a clearly negative effect, consistent with the earlier finding that Economy passengers are less satisfied on average. `Arrival.Delay` retains a small but reliably negative effect. The interaction terms, not shown explicitly in the plot due to shrinkage from BMA, have posterior means close to zero, reflecting the moderate PIP values.
+
+**Conclusion on interactions**
+
+The evidence for interactions is moderate rather than conclusive. The `Inflight.Entertainment × Class` terms are selected in the majority of visited models, providing suggestive evidence that entertainment quality matters more — or less — depending on travel class. However, given the limited improvement in R² and predictive performance relative to the full main-effects model, the interaction model is best interpreted as an exploratory finding rather than a definitive improvement. The full model without interactions remains the preferred specification for prediction.
+
 # Predictive Exercise
 
 In this section we evaluate the predictive performance of the Bayesian logistic regression model. We split the dataset into a **learning set** (used to fit the model) and a **test set** (held out for prediction).
@@ -1106,3 +1157,47 @@ test_man_hpm_perf <- evaluate_performance(test_man_hpm_pred, 0.5, test_enc)
 cat("Test set performance, BMA vs HPM:\n")
 print_performances(test_man_bma_perf, test_man_hpm_perf, "BMA", "HPM")
 ```
+
+
+## AUC
+
+The **Area Under the ROC Curve (AUC)** evaluates the model's discriminative ability across *all possible classification thresholds*, not just the 0.5 cutoff used for accuracy. The ROC curve plots sensitivity (true positive rate) against 1 − specificity (false positive rate) as the threshold varies from 0 to 1. An AUC of 0.5 corresponds to a random classifier, while an AUC of 1 indicates perfect separation between the two classes.
+
+```{r}
+# AUC — BMA
+roc_bma <- roc(
+  response  = as.numeric(test_enc$Satisfaction) - 1,
+  predictor = as.numeric(prob_bma)
+)
+auc_bma <- auc(roc_bma)
+
+# AUC — HPM
+roc_hpm <- roc(
+  response  = as.numeric(test_enc$Satisfaction) - 1,
+  predictor = as.numeric(prob_hpm)
+)
+auc_hpm <- auc(roc_hpm)
+
+cat("BMA — AUC:", round(auc_bma, 4), "\n")
+cat("HPM — AUC:", round(auc_hpm, 4), "\n")
+```
+
+Both estimators achieve excellent discriminative performance. BMA reaches an AUC of **0.9134** and HPM of **0.9059**, both well above 0.9, a threshold commonly used to indicate *outstanding* classification ability.
+
+```{r}
+# ROC curve plot
+plot(roc_bma, col = "steelblue", lwd = 2,
+     main = "ROC curves — BMA vs HPM (test set)")
+lines(roc_hpm, col = "darkorange", lwd = 2, lty = 2)
+legend("bottomright",
+       legend = c(
+         paste0("BMA"),
+         paste0("HPM")
+       ),
+       col = c("steelblue", "darkorange"),
+       lwd = 2, lty = c(1, 2))
+```
+
+The ROC curves confirm this: they rise steeply toward the upper-left corner of the plot, meaning the model achieves high sensitivity while keeping the false positive rate low, across virtually every threshold. This is consistent with the well-separated predicted probability distributions observed earlier.
+
+The gap between BMA and HPM is small (0.0075), but BMA consistently outperforms HPM both in AUC and in accuracy (85.50% vs 84.00%). This is the expected theoretical behaviour: by averaging predictions across all visited models weighted by their posterior probability, BMA absorbs model uncertainty and produces more robust, better-calibrated probabilities than committing to a single model as HPM does.
