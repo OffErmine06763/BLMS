@@ -1015,8 +1015,8 @@ test_full_bma_auc <- auc(test_full_bma_roc)
 test_full_hpm_roc <- compute_roc(test_enc, test_full_hpm_prob)
 test_full_hpm_auc <- auc(test_full_hpm_roc)
 
-cat("BMA - AUC:", round(auc_bma, 4), "\n")
-cat("HPM - AUC:", round(auc_hpm, 4), "\n")
+cat("BMA - AUC:", round(test_full_bma_auc, 4), "\n")
+cat("HPM - AUC:", round(test_full_hpm_auc, 4), "\n")
 ```
 
 Both estimators achieve excellent discriminative performance. BMA reaches an AUC of **0.9134** and HPM of **0.9059**, both well above 0.9, a threshold commonly used to indicate *outstanding* classification ability.
@@ -1293,7 +1293,7 @@ plot_roc(
 Accuracy and friends
 
 ```{r}
-plot_perf("accuracy")
-plot_perf("sensitivity")
-plot_perf("specificity")
+plot_perf_comparison("accuracy")
+plot_perf_comparison("sensitivity")
+plot_perf_comparison("specificity")
 ```
