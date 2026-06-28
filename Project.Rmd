@@ -719,15 +719,16 @@ confint(coef(fit_int))
 
 par(mfrow = c(2, 2))
 
-plot(fit_man, which = 1)
-plot(fit_man, which = 2)
-plot(fit_man, which = 3)
-plot(fit_man, which = 4)
+plot(fit_int, which = 1)
+plot(fit_int, which = 2)
+plot(fit_int, which = 3)
+plot(fit_int, which = 4)
 
 par(mfrow = c(1, 1))
 
 plot(confint(coef(fit_int)), main="coeff confidence intervals")
 ```
+
 ```{r}
 pip_int <- data.frame(
   variable = fit_int$namesx,
@@ -737,6 +738,7 @@ pip_int <- data.frame(
 pip_int <- pip_int[order(pip_int$PIP, decreasing = TRUE), ]
 pip_int
 ```
+
 The PIP table reveals a clear separation between main effects and interaction terms. The main effects `Customer.TypeLoyal` (PIP = 0.999), `Inflight.Entertainment` (PIP = 1.000), `Ease.of.Online.Booking` (PIP = 0.999), `On.Board.Service` (PIP = 0.958) and `Arrival.Delay` (PIP = 0.995) are selected in virtually every visited model, confirming the results already obtained in the full model without interactions.
 
 The interaction terms tell a more nuanced story. `Inflight.Entertainment:ClassEco` has a PIP of 0.656 and `Inflight.Entertainment:ClassEco Plus` of 0.527 — both above 0.5, suggesting moderate evidence that the effect of in-flight entertainment on satisfaction is not uniform across travel classes. Economy and Eco Plus passengers appear to respond differently to entertainment quality compared to Business class passengers, which is the reference category. By contrast, the `Seat.Comfort` interaction terms (`ClassEco:Seat.Comfort` PIP = 0.216, `ClassEco Plus:Seat.Comfort` PIP = 0.238) fall well below 0.5, indicating that the effect of seat comfort on satisfaction does not vary meaningfully across classes once the other predictors are accounted for.
@@ -820,6 +822,8 @@ print_performance <- function(performance) {
   print(performance$conf_mat)
 }
 
+# Prints the performance metrics for two models
+# - perf_1, perf_2: the output of "evaluate_performance(...)"
 print_performances <- function(perf_1, perf_2, name_1 = "Model 1", name_2 = "Model 2") {
   cat(sprintf("             %-6s %-6s\n", name_1, name_2))
   cat("Accuracy:   ", round(perf_1$accuracy, 4), round(perf_2$accuracy, 4), "\n")
@@ -830,6 +834,56 @@ print_performances <- function(perf_1, perf_2, name_1 = "Model 1", name_2 = "Mod
   print(perf_1$conf_mat)
   cat("\nConfusion Matrix ", name_2, ":\n", sep = "")
   print(perf_2$conf_mat)
+}
+
+compute_roc <- function(dataset, probs) {
+  roc(
+    response  = as.numeric(dataset$Satisfaction) - 1,
+    predictor = as.numeric(probs)
+  )
+}
+
+# Plots ROC curves
+# - rocs: a "list(...)" of the values returned by "compute_roc(...)"
+# - palette: a "c(...)" of colors at least as long as "rocs" or NULL
+# - legend: a "c(...)" of strings to display in the legend
+plot_roc <- function(rocs, palette = NULL, title = NULL, legend) {
+  if (is.null(title))
+    title = "ROC curves"
+  if (is.null(palette))
+    palette = c("steelblue", "darkorange", "forestgreen", "purple", "red", "yellow", "cyan", "blue")
+  
+  plot(rocs[[1]], col = palette[1], lwd = 2, xlim = c(1, 0), main = title,
+       print.auc = TRUE, print.auc.y = 0.5, 
+       print.thres = c(0.5), print.thres.adj = c(-0.05, 1.25), print.thres.pattern = "%.3f"
+  )
+  for (i in 2:length(rocs)) {
+    plot(rocs[[i]], col = palette[i], lwd = 2, xlim = c(1, 0),
+         print.auc = TRUE, print.auc.y = 0.5 - (i - 1) * 0.05,
+         print.thres = c(0.5), print.thres.adj = c(-0.05, 1.25 + (i - 1) * 0.5), print.thres.pattern = "%.3f",
+         add = TRUE
+    )
+  }
+  legend("bottomright", legend = legend, col = palette, lwd = 2)
+}
+
+# Bar plot showing the selected metric for all trained models
+# - metric: any scalar field in the return value of "evaluate_performance(...)"
+plot_perf_comparison <- function(metric) {
+  df <- data.frame(
+    group = rep(c("Full", "Threshold", "Manual", "Initial"), each = 2),
+    type  = rep(c("BMA", "HPM"), times = 4),
+    value = c(test_full_bma_perf[[metric]], test_full_hpm_perf[[metric]],
+              test_th_bma_perf[[metric]]  , test_th_hpm_perf[[metric]],
+              test_man_bma_perf[[metric]] , test_man_hpm_perf[[metric]],
+              test_init_bma_perf[[metric]], test_init_hpm_perf[[metric]])
+  )
+  
+  ggplot(df, aes(x = group, y = value, fill = type)) +
+    geom_col(position = "dodge") +
+    coord_cartesian(ylim = c(0, 1)) +
+    theme_minimal() +
+    labs(x = "", y = "Value", fill = "Type")
 }
 ```
 
@@ -948,6 +1002,33 @@ Looking at the confusion matrices in detail:
 
 Overall, an accuracy above 80% with balanced sensitivity and specificity on held-out data, using a model estimated purely on Bayesian principles with no manual tuning of the decision threshold, is a strong result and confirms that the selected predictors carry genuine and replicable signal about passenger satisfaction.
 
+**AUC**
+
+The **Area Under the ROC Curve (AUC)** evaluates the model's discriminative ability across *all possible classification thresholds*, not just the 0.5 cutoff used for accuracy. The ROC curve plots sensitivity (true positive rate) against 1 − specificity (false positive rate) as the threshold varies from 0 to 1. An AUC of 0.5 corresponds to a random classifier, while an AUC of 1 indicates perfect separation between the two classes.
+
+```{r}
+# AUC — BMA
+test_full_bma_roc <- compute_roc(test_enc, test_full_bma_prob)
+test_full_bma_auc <- auc(test_full_bma_roc)
+
+# AUC — HPM
+test_full_hpm_roc <- compute_roc(test_enc, test_full_hpm_prob)
+test_full_hpm_auc <- auc(test_full_hpm_roc)
+
+cat("BMA - AUC:", round(auc_bma, 4), "\n")
+cat("HPM - AUC:", round(auc_hpm, 4), "\n")
+```
+
+Both estimators achieve excellent discriminative performance. BMA reaches an AUC of **0.9134** and HPM of **0.9059**, both well above 0.9, a threshold commonly used to indicate *outstanding* classification ability.
+
+```{r}
+plot_roc(rocs = list(test_full_bma_roc, test_full_hpm_roc), legend = c("BMA", "HPM"), title = "Full - Test")
+```
+
+The ROC curves confirm this: they rise steeply toward the upper-left corner of the plot, meaning the model achieves high sensitivity while keeping the false positive rate low, across virtually every threshold. This is consistent with the well-separated predicted probability distributions observed earlier.
+
+The gap between BMA and HPM is small (0.0075), but BMA consistently outperforms HPM both in AUC and in accuracy (85.50% vs 84.00%). This is the expected theoretical behaviour: by averaging predictions across all visited models weighted by their posterior probability, BMA absorbs model uncertainty and produces more robust, better-calibrated probabilities than committing to a single model as HPM does.
+
 ## Initial Model
 
 ### Predict Learning Set
@@ -1016,6 +1097,15 @@ test_init_hpm_perf <- evaluate_performance(test_init_hpm_pred, 0.5, test_enc)
 
 cat("Test set performance, BMA vs HPM:\n")
 print_performances(test_init_bma_perf, test_init_hpm_perf, "BMA", "HPM")
+```
+
+**AUC**
+
+```{r}
+test_init_bma_roc <- compute_roc(test_enc, test_init_bma_prob)
+test_init_hpm_roc <- compute_roc(test_enc, test_init_hpm_prob)
+
+plot_roc(rocs = list(test_init_bma_roc, test_init_hpm_roc), legend = c("BMA", "HPM"), title = "Initial - Test")
 ```
 
 ## Threshold Selection Model
@@ -1088,6 +1178,15 @@ cat("Test set performance, BMA vs HPM:\n")
 print_performances(test_th_bma_perf, test_th_hpm_perf, "BMA", "HPM")
 ```
 
+**AUC**
+
+```{r}
+test_th_bma_roc <- compute_roc(test_enc, test_th_bma_prob)
+test_th_hpm_roc <- compute_roc(test_enc, test_th_hpm_prob)
+
+plot_roc(rocs = list(test_th_bma_roc, test_th_hpm_roc), legend = c("BMA", "HPM"), title = "Threshold - Test")
+```
+
 ## Manual Selection Model
 
 ### Predict Learning Set
@@ -1158,46 +1257,43 @@ cat("Test set performance, BMA vs HPM:\n")
 print_performances(test_man_bma_perf, test_man_hpm_perf, "BMA", "HPM")
 ```
 
-
-## AUC
-
-The **Area Under the ROC Curve (AUC)** evaluates the model's discriminative ability across *all possible classification thresholds*, not just the 0.5 cutoff used for accuracy. The ROC curve plots sensitivity (true positive rate) against 1 − specificity (false positive rate) as the threshold varies from 0 to 1. An AUC of 0.5 corresponds to a random classifier, while an AUC of 1 indicates perfect separation between the two classes.
+**AUC**
 
 ```{r}
-# AUC — BMA
-roc_bma <- roc(
-  response  = as.numeric(test_enc$Satisfaction) - 1,
-  predictor = as.numeric(prob_bma)
-)
-auc_bma <- auc(roc_bma)
+test_man_bma_roc <- compute_roc(test_enc, test_man_bma_prob)
+test_man_hpm_roc <- compute_roc(test_enc, test_man_hpm_prob)
 
-# AUC — HPM
-roc_hpm <- roc(
-  response  = as.numeric(test_enc$Satisfaction) - 1,
-  predictor = as.numeric(prob_hpm)
-)
-auc_hpm <- auc(roc_hpm)
-
-cat("BMA — AUC:", round(auc_bma, 4), "\n")
-cat("HPM — AUC:", round(auc_hpm, 4), "\n")
+plot_roc(rocs = list(test_man_bma_roc, test_man_hpm_roc), legend = c("BMA", "HPM"), title = "Manual - Test")
 ```
 
-Both estimators achieve excellent discriminative performance. BMA reaches an AUC of **0.9134** and HPM of **0.9059**, both well above 0.9, a threshold commonly used to indicate *outstanding* classification ability.
+## Comparisons
+
+Predicted probabilities
+
+```{r fig.width=10, fig.height=8}
+
+plots <- compare_predictions(test_full_bma_pred, test_th_bma_pred, test_enc, "Full - BMA - Test", "Threshold - BMA - Test")
+plots <- c(plots, compare_predictions(test_full_bma_pred, test_man_bma_pred, test_enc, "Full - BMA - Test", "Manual - BMA - Test"))
+plots <- c(plots, compare_predictions(test_full_bma_pred, test_init_bma_pred, test_enc, "Full - BMA - Test", "Initial - BMA - Test"))
+plots <- c(plots, compare_predictions(test_th_bma_pred, test_man_bma_pred, test_enc, "Threshold - BMA - Test", "Manual - BMA - Test"))
+
+wrap_plots(plots, ncol = 2)
+```
+
+ROC
 
 ```{r}
-# ROC curve plot
-plot(roc_bma, col = "steelblue", lwd = 2,
-     main = "ROC curves — BMA vs HPM (test set)")
-lines(roc_hpm, col = "darkorange", lwd = 2, lty = 2)
-legend("bottomright",
-       legend = c(
-         paste0("BMA"),
-         paste0("HPM")
-       ),
-       col = c("steelblue", "darkorange"),
-       lwd = 2, lty = c(1, 2))
+plot_roc(
+  rocs = list(test_full_bma_roc, test_th_bma_roc, test_man_bma_roc, test_init_bma_roc), 
+  legend = c("Full", "Threshold", "Manual", "Initial"), 
+  title = "BMA - Test"
+)
 ```
 
-The ROC curves confirm this: they rise steeply toward the upper-left corner of the plot, meaning the model achieves high sensitivity while keeping the false positive rate low, across virtually every threshold. This is consistent with the well-separated predicted probability distributions observed earlier.
+Accuracy and friends
 
-The gap between BMA and HPM is small (0.0075), but BMA consistently outperforms HPM both in AUC and in accuracy (85.50% vs 84.00%). This is the expected theoretical behaviour: by averaging predictions across all visited models weighted by their posterior probability, BMA absorbs model uncertainty and produces more robust, better-calibrated probabilities than committing to a single model as HPM does.
+```{r}
+plot_perf("accuracy")
+plot_perf("sensitivity")
+plot_perf("specificity")
+```
