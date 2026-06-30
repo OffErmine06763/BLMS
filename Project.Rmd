@@ -1297,3 +1297,323 @@ plot_perf_comparison("accuracy")
 plot_perf_comparison("sensitivity")
 plot_perf_comparison("specificity")
 ```
+
+### Initial cleanup ###
+```{r}
+
+table_raw <- read.csv("data_full.csv")
+
+
+rows <- nrow(table_raw)
+cols <- ncol(table_raw)
+
+## Cleanup
+# Rename some of the columns / values to fix capitalization
+
+table <- table_raw
+
+names(table)[names(table) == "satisfaction"                     ] <- "Satisfaction"
+names(table)[names(table) == "Seat.comfort"                     ] <- "Seat.Comfort"
+names(table)[names(table) == "Departure.Arrival.time.convenient"] <- "Departure.Arrival.Time.Convenient"
+names(table)[names(table) == "Food.and.drink"                   ] <- "Food.and.Drink"
+names(table)[names(table) == "Gate.location"                    ] <- "Gate.Location"
+names(table)[names(table) == "Inflight.wifi.service"            ] <- "Inflight.WiFi"
+names(table)[names(table) == "Inflight.entertainment"           ] <- "Inflight.Entertainment"
+names(table)[names(table) == "Online.support"                   ] <- "Online.Support"
+names(table)[names(table) == "Ease.of.Online.booking"           ] <- "Ease.of.Online.Booking"
+names(table)[names(table) == "On.board.service"                 ] <- "On.Board.Service"
+names(table)[names(table) == "Leg.room.service"                 ] <- "Leg.Room"
+names(table)[names(table) == "Baggage.handling"                 ] <- "Baggage.Handling"
+names(table)[names(table) == "Checkin.service"                  ] <- "Checkin"
+names(table)[names(table) == "Online.boarding"                  ] <- "Online.Boarding"
+names(table)[names(table) == "Departure.Delay.in.Minutes"       ] <- "Departure.Delay"
+names(table)[names(table) == "Arrival.Delay.in.Minutes"         ] <- "Arrival.Delay"
+
+table$Satisfaction  [table$Satisfaction   == "satisfied"        ] <- "Satisfied"
+table$Satisfaction  [table$Satisfaction   == "dissatisfied"     ] <- "Dissatisfied"
+table$Customer.Type [table$Customer.Type  == "Loyal Customer"   ] <- "Loyal"
+table$Customer.Type [table$Customer.Type  == "disloyal Customer"] <- "Disloyal"
+table$Type.of.Travel[table$Type.of.Travel == "Business travel"  ] <- "Businness"
+table$Type.of.Travel[table$Type.of.Travel == "Personal Travel"  ] <- "Personal"
+# Inspect for NA
+
+table[!complete.cases(table), ]
+
+# remove rows with NA (likely more than 3 here, since this is the full ~130k dataset
+# rather than the cleaned 1000-row subset -- check the count before assuming it's negligible)
+cat("Rows with NA:", sum(!complete.cases(table)), "out of", nrow(table), "\n")
+table <- na.omit(table)
+# Define some useful constants
+
+score_vars <- c(
+  "Seat.Comfort",
+  "Departure.Arrival.Time.Convenient",
+  "Food.and.Drink",
+  "Gate.Location",
+  "Inflight.WiFi",
+  "Inflight.Entertainment",
+  "Online.Support",
+  "Ease.of.Online.Booking",
+  "On.Board.Service",
+  "Leg.Room",
+  "Baggage.Handling",
+  "Checkin",
+  "Cleanliness",
+  "Online.Boarding"
+)
+cat_vars <- c(
+  "Customer.Type",
+  "Type.of.Travel",
+  "Class"
+)
+num_vars <- c(
+  "Age",
+  "Flight.Distance",
+  "Departure.Delay",
+  "Arrival.Delay"
+)
+all_vars <- c(score_vars, cat_vars, num_vars)
+target_var <- "Satisfaction"
+```
+
+### Plots ###
+
+
+```{r}
+## Quick standardization for plotting
+
+table_full_std <- table %>%
+  mutate(across(
+    c(Departure.Delay, Arrival.Delay, Flight.Distance, Age),
+    ~ as.numeric(scale(.))
+  ))
+```
+
+
+```{r fig.width=14, fig.height=20}
+### Boxplots
+
+# With ~130k rows, full boxplots per variable are still meaningful (boxplots
+# summarize, they don't plot every point), so this scales fine.
+
+pairs <- lapply(all_vars, function(v) {
+  c("Satisfaction", v)
+})
+
+plots <- lapply(pairs, function(p) {
+  cat_var <- p[1]
+  num_var <- p[2]
+
+  ggplot(table_full_std, aes(x = .data[[cat_var]], y = .data[[num_var]])) +
+  geom_boxplot(outlier.alpha = 0.05) +
+  labs(
+    x = cat_var,
+    y = num_var,
+    title = ""
+  ) +
+  theme_bw()
+})
+
+wrap_plots(plots, ncol = 3)
+
+```
+
+```{r fig.width=14, fig.height=20}
+### Barplots
+
+# Counts of each value of the categorical/score variables, split by Satisfaction
+
+plot_bar <- function(vars, scale = NULL) {
+  x_scale <- if (!is.null(scale)) {
+    scale_x_discrete(limits = scale)
+  } else {
+    NULL
+  }
+  
+  plots <- lapply(vars, function(v) {
+    ggplot(table, aes(
+      x = factor(.data[[v]]),
+      fill = factor(Satisfaction)
+    )) +
+      
+    geom_bar() +
+      
+    x_scale +
+    scale_fill_manual(
+      values = c(
+        "Dissatisfied" = "red",
+        "Satisfied" = "forestgreen"
+      )
+    ) +
+      
+    labs(
+      title = v,
+      x = NULL,
+      y = "Count",
+      fill = "Satisfaction"
+    ) +
+    theme_bw()
+  })
+}
+
+plots <- plot_bar(c(target_var, cat_vars))
+plots <- c(plots, plot_bar(score_vars, c("0", "1", "2", "3", "4", "5")))
+
+wrap_plots(plots, ncol = 3)
+
+```
+
+```{r fig.width=14, fig.height=20}
+### Barplots Percentages
+
+# Percentage of satisfied/dissatisfied for each value of each categorical/score
+# variable -- more informative than raw counts since it normalizes class imbalance
+
+plot_bar_perc <- function(vars, scale = NULL) {
+  x_scale <- if (!is.null(scale)) {
+    scale_x_discrete(limits = scale)
+  } else {
+    NULL
+  }
+  
+  plots <- lapply(vars, function(v) {
+
+    ggplot(table, aes(
+      x = factor(.data[[v]]),
+      fill = Satisfaction
+    )) +
+    geom_bar(position = "fill") +
+  
+    geom_text(
+      stat = "count",
+      aes(label = after_stat(count)),
+      position = position_fill(vjust = 0.5),
+      color = "white",
+      size = 2.5
+    ) +
+  
+    scale_y_continuous(labels = scales::percent) +
+    x_scale +
+    scale_fill_manual(
+      values = c(
+        "Dissatisfied" = "red",
+        "Satisfied" = "forestgreen"
+      )
+    ) +
+      
+    labs(
+      title = v,
+      x = NULL,
+      y = "Percentage",
+      fill = "Satisfaction"
+    ) +
+    theme_bw()
+  })
+}
+
+plots <- c(plot_spacer(), plot_bar_perc(cat_vars))
+plots <- c(plots, plot_bar_perc(score_vars, c("0", "1", "2", "3", "4", "5")))
+
+wrap_plots(plots, ncol = 3)
+```
+
+```{r fig.width=12, fig.height=10}
+
+## Correlation
+
+corr_matrix <- cor(table_full_std[, c(num_vars, score_vars)], use = "complete.obs")
+
+corrplot(corr_matrix,
+         method = "color",
+         type = "upper",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         number.cex = 0.7)
+
+```
+
+There are not many differences compared to the smaller version in the plots. The most notable ones is in the boxplot. Since we have more data, we are more likely to encounter data found at the tail of the distribution, this gives us more outlier, which are also further from the mean.
+
+### Data preparation ###
+
+```{r}
+## Train-Test Split
+
+# We use a random sample as the test set and the remaining rows as the learning
+# set, fixing the seed so the split is reproducible.
+
+# Perform train-test split at the beginning of the analysis since even variable
+# selection based on a model trained on the whole data would be a data leakage
+# when measuring performance on the test set.
+
+set.seed(67)
+idx <- sample(nrow(table))
+
+n_test <- 39000 #~30 % of the data set
+
+table_test  <- table[idx[1:n_test], ]
+table_train <- table[idx[(n_test + 1):nrow(table)], ]
+
+rownames(table_train) <- seq_len(nrow(table_train))
+rownames(table_test)  <- seq_len(nrow(table_test))
+
+cat("Learning set size:", nrow(table_train), "\n")
+cat("Test set size:    ", nrow(table_test ), "\n")
+## Standardize and Encode
+
+# Compute mean and sd on TRAIN only
+train_means <- sapply(table_train[, num_vars], mean)
+train_sds   <- sapply(table_train[, num_vars], sd)
+
+# Scale train
+table_std <- table_train
+table_std[, num_vars] <- scale(table_train[, num_vars], center = train_means, scale = train_sds)
+
+# Scale test using the same (train-derived) parameters
+test_std <- table_test
+test_std[, num_vars] <- scale(table_test[, num_vars], center = train_means, scale = train_sds)
+
+# Encode strings as factors -- BAS treats factors as categorical, introducing
+# dummy variables for the n-1 possible values
+table_enc <- table_std %>%
+  mutate(across(where(is.character), as.factor))
+test_enc  <- test_std %>%
+  mutate(across(where(is.character), as.factor))
+```
+### The initial regression model ###
+This takes a while to run
+
+```{r}
+fit_bic <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data      = table_enc,
+  family    = binomial(),
+  betaprior = bic.prior(n = nrow(table_enc))
+)
+
+fit_aic <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data      = table_enc,
+  family    = binomial(),
+  betaprior = aic.prior()
+)
+
+fit_robust <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data      = table_enc,
+  family    = binomial(),
+  betaprior = robust()
+)
+
+pip_comparison <- data.frame(
+  variable = fit_bic$namesx,
+  PIP_BIC  = fit_bic$probne0,
+  PIP_AIC  = fit_aic$probne0,
+  PIP_robust = fit_robust$probne0
+)
+pip_comparison <- pip_comparison[order(pip_comparison$PIP_BIC, decreasing = TRUE), ]
+pip_comparison
+
+```
+
