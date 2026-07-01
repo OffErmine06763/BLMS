@@ -351,11 +351,11 @@ ggpairs(
 
 From the correlation matrix we see that most predictors are uncorrelated, with a few exceptions, such as
 
-- between the "Online" sth sth variables, which kinda makes sense, a good online service is good across all aspects.
+-   between the "Online" sth sth variables, which kinda makes sense, a good online service is good across all aspects.
 
-- between the flight enjoyment variables (Seat.Comfort, Food.and.Drink, Inflight.Entertainment)
+-   between the flight enjoyment variables (Seat.Comfort, Food.and.Drink, Inflight.Entertainment)
 
-- `Departure.Delay` and `Arrival.Delay`: if you depart late, you will arrive late, thus almost full correlation.
+-   `Departure.Delay` and `Arrival.Delay`: if you depart late, you will arrive late, thus almost full correlation.
 
 and more with similar interpretations.
 
@@ -381,39 +381,39 @@ First of all, BAS is using BMA (Bayesian Model Averaging), so we train many mode
 
 To interpret the summary:
 
-- `P(B != 0 | Y)`: aka Posterior Inclusion Probability (PIP), how likely the variable belongs to the true model
+-   `P(B != 0 | Y)`: aka Posterior Inclusion Probability (PIP), how likely the variable belongs to the true model
 
-- The 1/0 under the models for the first rows (those corresponding to the predictors): boolean flag, whether that predictor is included in the model
+-   The 1/0 under the models for the first rows (those corresponding to the predictors): boolean flag, whether that predictor is included in the model
 
-- `BF`: Bayes Factor, idk what it is but it's a metric that compares each model with the best one, the higher the better, the best model has `BF = 1` by construction.
+-   `BF`: Bayes Factor, idk what it is but it's a metric that compares each model with the best one, the higher the better, the best model has `BF = 1` by construction.
 
-- `PostProb`: probability that that model is the true one, given the data
+-   `PostProb`: probability that that model is the true one, given the data
 
-- `logmar`: the higher the better
+-   `logmar`: the higher the better
 
 From the summary we see that:
 
-- `Flight.Distance` and `Departure.Delay` are not selected very frequently across all the models trained by BAS, they might not capture useful data to fit the `Satisfaction`
+-   `Flight.Distance` and `Departure.Delay` are not selected very frequently across all the models trained by BAS, they might not capture useful data to fit the `Satisfaction`
 
-- The best model obtained is much better than the others: `PostProbs` and `BF` are much higher than the other models, meaning that the data strongly prefers model 1 over the other alternatives.
+-   The best model obtained is much better than the others: `PostProbs` and `BF` are much higher than the other models, meaning that the data strongly prefers model 1 over the other alternatives.
 
-- `R2` is very bad for all the models, we are not fitting the data at all
+-   `R2` is very bad for all the models, we are not fitting the data at all
 
 In the summary of coefficients reports the average over the evaluated models weighted by their posterior probability, where
 
-- `post mean`: average effect of a variable across all models, but models where the variable is absent count as 0 effect, so this is a shrunken, uncertainty-aware estimate.
+-   `post mean`: average effect of a variable across all models, but models where the variable is absent count as 0 effect, so this is a shrunken, uncertainty-aware estimate.
 
-- `post SD`: uncertainty on the effect, including the model uncertainty
+-   `post SD`: uncertainty on the effect, including the model uncertainty
 
 so we can say that
 
-- `Seat.Comfort`: positive effect and high PIP, as expected
+-   `Seat.Comfort`: positive effect and high PIP, as expected
 
-- `ClassEco` and `ClassEco Plus`: they have negative effect (more likely to be dissatisfied when not in business class) and high PIP
+-   `ClassEco` and `ClassEco Plus`: they have negative effect (more likely to be dissatisfied when not in business class) and high PIP
 
-- `Arrival.Delay` and `Departure.Delay` have a negative effect (as expected) but a low PIP, however this is probably due to the veeery strong correlation between the two, so they split the PIP in two.
+-   `Arrival.Delay` and `Departure.Delay` have a negative effect (as expected) but a low PIP, however this is probably due to the veeery strong correlation between the two, so they split the PIP in two.
 
-- `Age`: poor PIP and a small coefficient, even if zero isn't in the 95% interval.
+-   `Age`: poor PIP and a small coefficient, even if zero isn't in the 95% interval.
 
 In the graph of the residuals the x is the prediction in the log-odds scale (I assume / ChatGPT says). I have to admit that i really can't understand that residual plot tho: when our model predicts log-odds = 0 (thus p(satisfied) = 0.5), we observe some residuals that are 0, which is impossible, any observations would either have satisfied = 0 or = 1, in both cases our prediction had a residual of 0.5. The same goes for residuals greater than 1. So maybe even the y is in the log-odds scale? but this still doesn't make sense, consider the right side, i guess (ChatGPT says) that the two lines correspond to the two values satisfaction can assume, then when we predict 2 (p = 0.88), we have a residual of -2 for one class and -1 for the other, this means that we should have predicted 4 or 3 (to be exact for one class) (or equivalently predict 0 and 1) , but this means making a prediction where we are more strongly convinced that satisfaction = 1 (or = 0 equivalently) for both classes =\> contradiction... i just don't know how to read it and ChatGPT isn't helping.
 
@@ -588,13 +588,13 @@ We can start by fitting a simpler model where we consider only the variables wit
 
 Notice that
 
-- the PIP threshold might separate the dummy variables for categorical predictors =\> in the model I must use the original variable
+-   the PIP threshold might separate the dummy variables for categorical predictors =\> in the model I must use the original variable
 
-- now all predictors have high PIP, even those that had PIP slightly above the threshold in the full model, this is due to the removal of the correlated predictors that shared part of the PIP.
+-   now all predictors have high PIP, even those that had PIP slightly above the threshold in the full model, this is due to the removal of the correlated predictors that shared part of the PIP.
 
-- the model is now small enough to train it without MCMC
+-   the model is now small enough to train it without MCMC
 
-- only one model (the one with all predictors) has a high `PostProb`, meaning that the predictions will be heavily influenced by that single model, but it's not that strong to state that there is no model uncertainty
+-   only one model (the one with all predictors) has a high `PostProb`, meaning that the predictions will be heavily influenced by that single model, but it's not that strong to state that there is no model uncertainty
 
 ```{r fig.width=8, fig.height=8}
 
@@ -640,11 +640,11 @@ For this reason we might want to manually choose a subset of the predictors excl
 
 The following variables have been chosen based on
 
-- the box-plots, picking the variables that show the most clear division between satisfied and dissatisfied customers,
+-   the box-plots, picking the variables that show the most clear division between satisfied and dissatisfied customers,
 
-- the correlation matrix, trying not to pick two strongly correlated variables.
+-   the correlation matrix, trying not to pick two strongly correlated variables.
 
-- the knowledge of the problem: a loyal customer is more likely to be satisfied otherwise he wouldn't be loyal in the first place, delays sure lower the satisfaction and so on...
+-   the knowledge of the problem: a loyal customer is more likely to be satisfied otherwise he wouldn't be loyal in the first place, delays sure lower the satisfaction and so on...
 
 We see that overall the model is very simple and the best model obtained (that includes all the selected variables) has a much better `R2` compared to the suggested model. Being the `PostProb` all concentrated in one model means that BMA is kinda pointless in this case, all the other models obtained (each excluding a useful variable) have almost 0 weight. However this doesn't mean that we found the correct model, it just means that among all the models that contain the selected variables, we are sure that that's the "more adequate" one. So, when making predictions we can just use the HPM.
 
@@ -682,8 +682,8 @@ plot(confint(coef(fit_man)), main="coeff confidence intervals")
 
 From the knowledge of the problem domain, we can also identify some clusters of features:
 
-- Digital experience cluster: `Inflight.WiFi`, `Inflight.Entertainment`, `Online.Support`, `Ease.of.Online.Booking`, `Online.Boarding`
-- On-board service cluster: `On.Board.Service`, `Leg.Room`, `Cleanliness`, `Baggage.Handling`, `Checkin`
+-   Digital experience cluster: `Inflight.WiFi`, `Inflight.Entertainment`, `Online.Support`, `Ease.of.Online.Booking`, `Online.Boarding`
+-   On-board service cluster: `On.Board.Service`, `Leg.Room`, `Cleanliness`, `Baggage.Handling`, `Checkin`
 
 Given the correlation matrix we see that the members of the first cluster are also highly correlated (maybe excluding `Inflight.Entertainment`) so we can try to merge them in a single feature that summarizes the whole effect. We could for instance take the average score across the predictors in the cluster (or better do PCA, but i refuse to think about ASS more than the strict necessary however).
 
@@ -917,8 +917,8 @@ compare_bma_hpc(fit_full, table_enc)
 
 We now predict on `test_enc`, i.e. the observations that were **not used to fit the model**. We obtain predictions under two estimators:
 
-- **BMA** (Bayesian Model Averaging): averages predictions across all visited models, weighted by their posterior probability;
-- **HPM** (Highest Posterior Model): uses only the single model with the largest posterior probability.
+-   **BMA** (Bayesian Model Averaging): averages predictions across all visited models, weighted by their posterior probability;
+-   **HPM** (Highest Posterior Model): uses only the single model with the largest posterior probability.
 
 ```{r}
 test_full_bma_pred <- predict(fit_full, newdata = test_enc, estimator = "BMA")
@@ -950,13 +950,13 @@ abline(v = 0.5, lty = 2, col = "gray50")
 
 ```
 
-- The model is well-separated: most predictions are concentrated near$\hat{p}$​≈0 or $\hat{p}$​≈1, meaning the model is generally confident in its classifications rather than uncertain around 0.5. This is a sign that the selected predictors carry strong discriminative information.
+-   The model is well-separated: most predictions are concentrated near$\hat{p}$​≈0 or $\hat{p}$​≈1, meaning the model is generally confident in its classifications rather than uncertain around 0.5. This is a sign that the selected predictors carry strong discriminative information.
 
-- The 0.5 threshold works well: points on y = 1 are predominantly on the right of the dashed line, and points on y = 0 are predominantly on the left, confirming that the 0.5 cutoff correctly separates the two classes in most cases.
+-   The 0.5 threshold works well: points on y = 1 are predominantly on the right of the dashed line, and points on y = 0 are predominantly on the left, confirming that the 0.5 cutoff correctly separates the two classes in most cases.
 
-- Misclassified observations are those where y = 1 but $\hat{p}$​\<0.5 (satisfied customers predicted as dissatisfied, visible on the left side of the y = 1 line) and vice versa. These are relatively few, consistent with the accuracy we computed.
+-   Misclassified observations are those where y = 1 but $\hat{p}$​\<0.5 (satisfied customers predicted as dissatisfied, visible on the left side of the y = 1 line) and vice versa. These are relatively few, consistent with the accuracy we computed.
 
-- Red and black points overlap closely, indicating that the model generalises well from the learning set to the test set, with no obvious signs of overfitting.
+-   Red and black points overlap closely, indicating that the model generalises well from the learning set to the test set, with no obvious signs of overfitting.
 
 **BMA vs HPM**
 
@@ -968,13 +968,13 @@ compare_bma_hpc(fit_full, test_enc)
 
 The plot compares the predicted probabilities of the two estimators on the test set, with points coloured by the true class.
 
-- **BMA and HPM agree closely**: almost all points lie very near the 45-degree dashed line, meaning the two estimators produce nearly identical predictions in this dataset. This is a reassuring sign: the data are informative enough that the posterior is concentrated around a single dominant model, so averaging across models (BMA) or picking the best one (HPM) leads to the same conclusion.
+-   **BMA and HPM agree closely**: almost all points lie very near the 45-degree dashed line, meaning the two estimators produce nearly identical predictions in this dataset. This is a reassuring sign: the data are informative enough that the posterior is concentrated around a single dominant model, so averaging across models (BMA) or picking the best one (HPM) leads to the same conclusion.
 
-- **BMA is slightly more conservative than HPM**: points tend to fall marginally *above* the diagonal for low predicted probabilities and *below* for high ones. In other words, BMA pulls predictions slightly toward 0.5 compared to HPM. This is the expected behaviour: BMA averages over models of varying complexity, and the simpler models included in the average shrink predictions toward the prior, while HPM commits fully to the single most probable model.
+-   **BMA is slightly more conservative than HPM**: points tend to fall marginally *above* the diagonal for low predicted probabilities and *below* for high ones. In other words, BMA pulls predictions slightly toward 0.5 compared to HPM. This is the expected behaviour: BMA averages over models of varying complexity, and the simpler models included in the average shrink predictions toward the prior, while HPM commits fully to the single most probable model.
 
-- **The two classes are well separated**: green points (Satisfied) cluster in the upper-right region ( $\hat{p}$​ close to 1 for both estimators) and red points (Dissatisfied) cluster in the lower-left ( $\hat{p}$​ close to 0). The overlap between the two colours is limited, confirming the good discriminative ability of the model already observed in the previous plot.
+-   **The two classes are well separated**: green points (Satisfied) cluster in the upper-right region ( $\hat{p}$​ close to 1 for both estimators) and red points (Dissatisfied) cluster in the lower-left ( $\hat{p}$​ close to 0). The overlap between the two colours is limited, confirming the good discriminative ability of the model already observed in the previous plot.
 
-- **Most disagreement between BMA and HPM occurs in the intermediate range** ( $\hat{p}$​​≈0.25–0.60), which is exactly where model uncertainty matters most. Outside this range the predictions are nearly identical, because a predicted probability close to 0 or 1 is robust to which model is selected.
+-   **Most disagreement between BMA and HPM occurs in the intermediate range** ( $\hat{p}$​​≈0.25–0.60), which is exactly where model uncertainty matters most. Outside this range the predictions are nearly identical, because a predicted probability close to 0 or 1 is robust to which model is selected.
 
 **Classification Performance**
 
@@ -994,11 +994,11 @@ The out-of-sample results confirm that both estimators generalise well to unseen
 
 Looking at the confusion matrices in detail:
 
-- Under **BMA**, 152 dissatisfied customers are correctly identified and 190 satisfied ones are correctly identified. The errors are 26 false positives (dissatisfied predicted as satisfied) and 32 false negatives (satisfied predicted as dissatisfied), roughly balanced between the two types of error.
+-   Under **BMA**, 152 dissatisfied customers are correctly identified and 190 satisfied ones are correctly identified. The errors are 26 false positives (dissatisfied predicted as satisfied) and 32 false negatives (satisfied predicted as dissatisfied), roughly balanced between the two types of error.
 
-- Under **HPM**, the picture is very similar: 148 and 188 correct classifications respectively, with 30 false positives and 34 false negatives. HPM makes slightly more false positive errors than BMA (30 vs 26), which explains most of the accuracy gap.
+-   Under **HPM**, the picture is very similar: 148 and 188 correct classifications respectively, with 30 false positives and 34 false negatives. HPM makes slightly more false positive errors than BMA (30 vs 26), which explains most of the accuracy gap.
 
-- The **sensitivity of BMA is 0.8559**, meaning that 85.59% of truly satisfied customers are correctly identified. The **specificity is 0.8539**, meaning that 85.39% of truly dissatisfied customers are correctly identified. The two metrics are very close to each other, which indicates that the model is **well-balanced**: it does not systematically favour one class over the other, a desirable property when both types of misclassification carry comparable costs.
+-   The **sensitivity of BMA is 0.8559**, meaning that 85.59% of truly satisfied customers are correctly identified. The **specificity is 0.8539**, meaning that 85.39% of truly dissatisfied customers are correctly identified. The two metrics are very close to each other, which indicates that the model is **well-balanced**: it does not systematically favour one class over the other, a desirable property when both types of misclassification carry comparable costs.
 
 Overall, an accuracy above 80% with balanced sensitivity and specificity on held-out data, using a model estimated purely on Bayesian principles with no manual tuning of the decision threshold, is a strong result and confirms that the selected predictors carry genuine and replicable signal about passenger satisfaction.
 
@@ -1298,7 +1298,8 @@ plot_perf_comparison("sensitivity")
 plot_perf_comparison("specificity")
 ```
 
-### Initial cleanup ###
+### Initial cleanup
+
 ```{r}
 
 table_raw <- read.csv("data_full.csv")
@@ -1376,8 +1377,7 @@ all_vars <- c(score_vars, cat_vars, num_vars)
 target_var <- "Satisfaction"
 ```
 
-### Plots ###
-
+### Plots
 
 ```{r}
 ## Quick standardization for plotting
@@ -1388,7 +1388,6 @@ table_full_std <- table %>%
     ~ as.numeric(scale(.))
   ))
 ```
-
 
 ```{r fig.width=14, fig.height=20}
 ### Boxplots
@@ -1535,7 +1534,7 @@ corrplot(corr_matrix,
 
 There are not many differences compared to the smaller version in the plots. The most notable ones is in the boxplot. Since we have more data, we are more likely to encounter data found at the tail of the distribution, this gives us more outlier, which are also further from the mean.
 
-### Data preparation ###
+### Data preparation
 
 ```{r}
 ## Train-Test Split
@@ -1581,9 +1580,14 @@ table_enc <- table_std %>%
 test_enc  <- test_std %>%
   mutate(across(where(is.character), as.factor))
 ```
-### The initial regression model ###
-This takes a while to run
 
+### The initial regression model
+
+This takes a while to run     
+It uses three different priors:      
+bic prior -\> bayes information criterion, I believe we have seen that in AS, it is a large-sample approximation to the Bayes factor. AS I understand it, it is not a real prior, it just uses the BIC formula for the likelihood, it is also somehow connected to the g prior.     
+aic prior -\> same idea, but uses AIC (again form AS??? Idk, I barely passed it)      
+robust -\> proper prior, uses a mixture of the g priors, to be robust on the choice of g priors     
 ```{r}
 fit_bic <- bas.glm(
   Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
@@ -1617,3 +1621,292 @@ pip_comparison
 
 ```
 
+```{r}
+# Pseudo-R² for a bas.glm fit
+pseudo_r2 <- function(fit, data, prior_name) {
+  
+  # Fitted probabilities under BMA
+  pred <- predict(fit, newdata = data, estimator = "BMA", type = "response")
+  p_hat <- pred$fit
+  
+  y <- as.numeric(data$Satisfaction == "Satisfied")
+  
+  # McFadden R²
+  # log-likelihood of fitted model
+  ll_fit  <- sum(y * log(p_hat + 1e-10) + (1 - y) * log(1 - p_hat + 1e-10))
+  # log-likelihood of null model (intercept only, predicts base rate everywhere)
+  p_null  <- mean(y)
+  ll_null <- sum(y * log(p_null) + (1 - y) * log(1 - p_null))
+  mcfadden <- 1 - ll_fit / ll_null
+  
+  # Tjur R²
+  mean_sat   <- mean(p_hat[y == 1])
+  mean_disat <- mean(p_hat[y == 0])
+  tjur <- mean_sat - mean_disat
+  
+  data.frame(
+    prior    = prior_name,
+    McFadden = round(mcfadden, 4),
+    Tjur     = round(tjur,     4)
+  )
+}
+
+r2_bic    <- pseudo_r2(fit_bic,    table_enc, "BIC")
+r2_aic    <- pseudo_r2(fit_aic,    table_enc, "AIC")
+r2_robust <- pseudo_r2(fit_robust, table_enc, "Robust")
+
+r2_table <- rbind(r2_bic, r2_aic, r2_robust)
+print(r2_table)
+```
+
+The R\^2 for the logistic regressions are hard to interpret on its own:    
+<https://statisticalhorizons.com/r2logistic/> A funny article of guy arguing about which R\^2 is better.    
+Ig we can just compare R\^2 between the models. Not as a value on its own.
+```{r}
+# Extract posterior means, SDs and credible intervals
+
+extract_bas_summary <- function(fit, prior_name) {
+  co <- coef(fit, estimator = "BMA")
+  ci <- confint(co)
+  
+  data.frame(
+    prior    = prior_name,
+    variable = fit$namesx,
+    PIP      = round(fit$probne0, 3),
+    post_mean = round(co$postmean, 3),
+    post_sd   = round(co$postsd,   3),
+    lower_95  = round(ci[, 1],     3),
+    upper_95  = round(ci[, 2],     3)
+  )
+}
+
+summary_bic    <- extract_bas_summary(fit_bic,    "BIC")
+summary_aic    <- extract_bas_summary(fit_aic,    "AIC")
+summary_robust <- extract_bas_summary(fit_robust, "Robust")
+
+# Stack all three
+summary_all <- rbind(summary_bic, summary_aic, summary_robust)
+
+# Wide comparison table: one row per variable, columns for each prior
+
+make_wide_table <- function(summary_all, metric) {
+  summary_all %>%
+    select(prior, variable, all_of(metric)) %>%
+    pivot_wider(names_from = prior, values_from = all_of(metric))
+}
+
+cat("=== Posterior Inclusion Probabilities ===\n")
+print(make_wide_table(summary_all, "PIP"))
+
+cat("\n=== Posterior Means ===\n")
+print(make_wide_table(summary_all, "post_mean"))
+
+cat("\n=== Posterior SDs ===\n")
+print(make_wide_table(summary_all, "post_sd"))
+
+cat("\n=== 95% Credible Interval Lower Bound ===\n")
+print(make_wide_table(summary_all, "lower_95"))
+
+cat("\n=== 95% Credible Interval Upper Bound ===\n")
+print(make_wide_table(summary_all, "upper_95"))
+
+```
+
+```{r}
+# Coefficient plot: posterior mean + 95% CI for each variable, 
+
+plot_data <- summary_all %>%
+  filter(variable != "Intercept")
+
+ggplot(plot_data, aes(
+  x    = post_mean,
+  y    = reorder(variable, post_mean),
+  xmin = lower_95,
+  xmax = upper_95,
+  color = prior
+)) +
+  geom_pointrange(
+    position = position_dodge(width = 0.5),
+    size     = 0.5
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~ prior, ncol = 3) +
+  scale_color_manual(values = c(
+    "BIC"    = "steelblue",
+    "AIC"    = "darkorange",
+    "Robust" = "forestgreen"
+  )) +
+  labs(
+    title = "Posterior means and 95% credible intervals by prior",
+    x     = "Posterior mean (BMA)",
+    y     = NULL,
+    color = "Prior"
+  ) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = "none")
+```
+
+```{r fig.width=12, fig.height=10}
+# Posterior density plots for each coefficient under each prior
+
+par(mfrow = c(3, 3))
+
+plot(coef(fit_bic,    estimator = "BMA"), ask = FALSE)
+mtext("BIC prior",    side = 3, line = -1.5, outer = TRUE, cex = 1.2)
+
+par(mfrow = c(3, 3))
+
+plot(coef(fit_aic,    estimator = "BMA"), ask = FALSE)
+mtext("AIC prior",    side = 3, line = -1.5, outer = TRUE, cex = 1.2)
+
+par(mfrow = c(3, 3))
+
+plot(coef(fit_robust, estimator = "BMA"), ask = FALSE)
+mtext("Robust prior", side = 3, line = -1.5, outer = TRUE, cex = 1.2)
+
+par(mfrow = c(1, 1))
+```
+
+```{r}
+compute_auc <- function(fit, train_data, test_data, prior_name) {
+  
+  y_train <- as.numeric(train_data$Satisfaction == "Satisfied")
+  y_test  <- as.numeric(test_data$Satisfaction  == "Satisfied")
+  
+  # BMA predictions on train and test
+  pred_train <- predict(fit, newdata = train_data, estimator = "BMA", type = "response")
+  pred_test  <- predict(fit, newdata = test_data,  estimator = "BMA", type = "response")
+  
+  roc_train <- roc(y_train, pred_train$fit, quiet = TRUE)
+  roc_test  <- roc(y_test,  pred_test$fit,  quiet = TRUE)
+  
+  data.frame(
+    prior    = prior_name,
+    AUC_train = round(as.numeric(auc(roc_train)), 4),
+    AUC_test  = round(as.numeric(auc(roc_test)),  4)
+  )
+}
+
+auc_bic    <- compute_auc(fit_bic,    table_enc, test_enc, "BIC")
+auc_aic    <- compute_auc(fit_aic,    table_enc, test_enc, "AIC")
+auc_robust <- compute_auc(fit_robust, table_enc, test_enc, "Robust")
+
+auc_table <- rbind(auc_bic, auc_aic, auc_robust)
+print(auc_table)
+```
+**How do they compare?**      
+Robust and aic give more or less the same results, bic is somewhat different. This should be a results of the large data set. bic is the only one that takes into the account the size of the data set (as log(n)), which is significant here. It therefore is the best one for this situation.     
+In terms of AUC, all the models perform the same.
+
+**G prior**   
+Another stability test could be with the g prior and different hyper parameters:
+```{r}
+fit_g1 <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data      = table_enc,
+  family    = binomial(),
+  betaprior = g.prior(g = 1)
+)
+
+fit_g10 <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data      = table_enc,
+  family    = binomial(),
+  betaprior = g.prior(g = 10)
+)
+
+fit_g100 <- bas.glm(
+  Satisfaction ~ Age + Seat.Comfort + Flight.Distance + Class + Departure.Delay + Arrival.Delay,
+  data      = table_enc,
+  family    = binomial(),
+  betaprior = g.prior(g = 100)
+)
+
+pip_comparison <- data.frame(
+  variable = fit_g1$namesx,
+  PIP_g1  = fit_g1$probne0,
+  PIP_g10  = fit_g10$probne0,
+  PIP_100 = fit_g100$probne0
+)
+pip_comparison <- pip_comparison[order(pip_comparison$PIP_g1, decreasing = TRUE), ]
+pip_comparison
+
+```
+
+```{r}
+extract_bas_summary <- function(fit, prior_name) {
+  co <- coef(fit, estimator = "BMA")
+  ci <- confint(co)
+  
+  data.frame(
+    prior    = prior_name,
+    variable = fit$namesx,
+    PIP      = round(fit$probne0, 3),
+    post_mean = round(co$postmean, 3),
+    post_sd   = round(co$postsd,   3),
+    lower_95  = round(ci[, 1],     3),
+    upper_95  = round(ci[, 2],     3)
+  )
+}
+
+summary_g1    <- extract_bas_summary(fit_g1,    "g1")
+summary_g10    <- extract_bas_summary(fit_g10,    "g10")
+summary_g100 <- extract_bas_summary(fit_g100, "g100")
+
+# Stack all three
+summary_all <- rbind(summary_g1, summary_g10, summary_g100)
+
+# Wide comparison table: one row per variable, columns for each prior
+
+make_wide_table <- function(summary_all, metric) {
+  summary_all %>%
+    select(prior, variable, all_of(metric)) %>%
+    pivot_wider(names_from = prior, values_from = all_of(metric))
+}
+
+cat("=== Posterior Inclusion Probabilities ===\n")
+print(make_wide_table(summary_all, "PIP"))
+
+cat("\n=== Posterior Means ===\n")
+print(make_wide_table(summary_all, "post_mean"))
+
+cat("\n=== Posterior SDs ===\n")
+print(make_wide_table(summary_all, "post_sd"))
+
+cat("\n=== 95% Credible Interval Lower Bound ===\n")
+print(make_wide_table(summary_all, "lower_95"))
+
+cat("\n=== 95% Credible Interval Upper Bound ===\n")
+print(make_wide_table(summary_all, "upper_95"))
+
+```
+
+```{r}
+compute_auc <- function(fit, train_data, test_data, prior_name) {
+  
+  y_train <- as.numeric(train_data$Satisfaction == "Satisfied")
+  y_test  <- as.numeric(test_data$Satisfaction  == "Satisfied")
+  
+  # BMA predictions on train and test
+  pred_train <- predict(fit, newdata = train_data, estimator = "BMA", type = "response")
+  pred_test  <- predict(fit, newdata = test_data,  estimator = "BMA", type = "response")
+  
+  roc_train <- roc(y_train, pred_train$fit, quiet = TRUE)
+  roc_test  <- roc(y_test,  pred_test$fit,  quiet = TRUE)
+  
+  data.frame(
+    prior    = prior_name,
+    AUC_train = round(as.numeric(auc(roc_train)), 4),
+    AUC_test  = round(as.numeric(auc(roc_test)),  4)
+  )
+}
+
+auc_g1    <- compute_auc(fit_g1,    table_enc, test_enc, "g1")
+auc_g10    <- compute_auc(fit_g10,    table_enc, test_enc, "g10")
+auc_g100 <- compute_auc(fit_g100, table_enc, test_enc, "g100")
+
+auc_table <- rbind(auc_g1, auc_g10, auc_g100)
+print(auc_table)
+```
+
+model selection is robust to g (same variables are always included), but coefficient estimates are sensitive to g through the shrinkage mechanism, and g=100 or g=n is preferred here because with 130k observations there's no need for strong regularization, 'cause the data are informative enough on their own. So, 1 is very different, but 10 and 100 are more similar. AUC is again the same
