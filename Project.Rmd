@@ -1780,7 +1780,203 @@ wrap_plots(plots_g, ncol = 2)
 
 Overall, the plots confirm that `g = 1` is the only specification that produces meaningfully different predictions, and in a detrimental way. The choices `g = 10`, `g = n` and `g = 100` are essentially interchangeable from a predictive standpoint, with `g = n` remaining the preferred choice on theoretical grounds
 
+# Comparison Model prior
 
+- **uniform** : Assigns equal probability to all 2p2\^p 2p possible models. It makes no assumption about model size, treating a model with 1 variable exactly as likely a priori as a model with all 6. It is the natural reference point but can implicitly favour medium-sized models since there are combinatorially more of them
+
+- **Beta- Binomial:** places a Beta-Binomial prior on the number of variables included, introducing uncertainty about model size. It is more flexible than Uniform because it adapts to the data also in terms of complexity, and it is the most commonly recommended choice in the BAS literature for general use
+
+- **Truncated Beta-Binomial:** a truncated version of the Beta-Binomial that excludes the null model (no predictors) and the saturated model (all predictors) from the model space. Useful when it is certain that at least one variable should be included and that not all variables are relevant simultaneously
+
+- **Truncated Poisson:** places a truncated Poisson prior on the number of included variables, favouring sparse models more aggressively than the Beta-Binomial. Particularly suited when strong prior belief exists that only a small number of predictors are truly relevant.
+
+```{r}
+#rm(beta.binomial)
+p <- 6 #number of coviarates
+n <- nrow(table_enc)
+
+model_prior_configs <- list(
+  list(name = "Uniform",       modelprior = BAS::uniform()),
+  list(name = "Beta-Binomial", modelprior = BAS::beta.binomial(alpha = 1, beta = 1)),
+  list(name = "Tr-Beta-Binom", modelprior = BAS::tr.beta.binomial(alpha = 1, beta = 1, trunc = p)),
+  list(name = "Tr-Poisson",    modelprior = BAS::tr.poisson(lambda = 5, trunc = p))
+)
+model_prior_fits <- lapply(model_prior_configs, function(cfg) {
+  bas.glm(
+    formula_init,
+    data       = table_enc,
+    family     = binomial(),
+    modelprior = cfg$modelprior
+  )
+})
+names(model_prior_fits) <- sapply(model_prior_configs, `[[`, "name")
+```
+
+## Pip comparison
+
+```{r}
+# PIP TABLE
+ 
+pip_mp_list <- lapply(names(model_prior_fits), function(nm) {
+  fit_i <- model_prior_fits[[nm]]
+  data.frame(
+    variable = fit_i$namesx,
+    PIP      = round(fit_i$probne0, 3),
+    prior    = nm
+  )
+})
+
+pip_mp_compare <- do.call(rbind, pip_mp_list)
+
+pip_mp_wide <- reshape(
+  pip_mp_compare,
+  idvar     = "variable",
+  timevar   = "prior",
+  direction = "wide"
+)
+names(pip_mp_wide) <- gsub("PIP\\.", "", names(pip_mp_wide))
+rownames(pip_mp_wide) <- NULL
+pip_mp_wide <- pip_mp_wide[order(pip_mp_wide[["Uniform"]], decreasing = TRUE), ]
+
+cat("=== PIP — model prior comparison ===\n")
+print(pip_mp_wide, row.names = FALSE)
+```
+```{r}
+# COEFFICIENTS — posterior mean, SD, 95% credible intervals
+
+coef_mp_list <- lapply(names(model_prior_fits), function(nm) {
+  cf <- coef(model_prior_fits[[nm]])
+  ci <- confint(cf)
+  data.frame(
+    variable  = cf$namesx,
+    post.mean = round(cf$postmean, 4),
+    post.sd   = round(cf$postsd,   4),
+    lower.95  = round(ci[, 1],     4),
+    upper.95  = round(ci[, 2],     4),
+    prior     = nm
+  )
+})
+
+coef_mp_compare <- do.call(rbind, coef_mp_list)
+
+for (v in unique(coef_mp_compare$variable)) {
+  sub <- coef_mp_compare[coef_mp_compare$variable == v,
+                         c("prior", "post.mean", "post.sd", "lower.95", "upper.95")]
+  cat("\n--- Variable:", v, "---\n")
+  print(sub, row.names = FALSE)
+}
+```
+```{r}
+# PLOT — Credible intervals per variabile, confronto model prior
+
+coef_mp_plot_df <- coef_mp_compare[coef_mp_compare$variable != "Intercept", ]
+
+ggplot(coef_mp_plot_df, aes(x = prior, y = post.mean, color = prior)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = lower.95, ymax = upper.95), width = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  facet_wrap(~ variable, scales = "free_y", ncol = 3) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Posterior means and 95% credible intervals — model prior comparison",
+    x     = NULL,
+    y     = "Posterior mean",
+    color = "Model Prior"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+```
+```{r}
+# PLOT — PIP barplot confronto model prior
+
+pip_mp_plot_df <- pip_mp_compare[pip_mp_compare$variable != "Intercept", ]
+
+ggplot(pip_mp_plot_df, aes(x = reorder(variable, PIP), y = PIP, fill = prior)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray40") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(
+    title = "Posterior Inclusion Probabilities — model prior comparison",
+    x     = NULL,
+    y     = "PIP",
+    fill  = "Model Prior"
+  ) +
+  theme_bw()
+```
+## Performance
+
+```{r}
+# PERFORMANCE — Accuracy, Sensitivity, Specificity, AUC
+
+perf_mp_summary <- do.call(rbind, lapply(names(model_prior_fits), function(nm) {
+  fit_i     <- model_prior_fits[[nm]]
+  pred_test <- predict(fit_i, newdata = test_enc, estimator = "BMA")
+  prob_test <- pred_test$fit
+  perf      <- evaluate_performance(pred_test, 0.5, test_enc)
+  roc_i     <- compute_roc(test_enc, prob_test)
+  
+  data.frame(
+    Prior       = nm,
+    Accuracy    = round(perf$accuracy,    4),
+    Sensitivity = round(perf$sensitivity, 4),
+    Specificity = round(perf$specificity, 4),
+    AUC         = round(as.numeric(auc(roc_i)), 4)
+  )
+}))
+
+cat("=== Performance on Test Set — model prior comparison ===\n")
+print(perf_mp_summary, row.names = FALSE)
+```
+## ROC
+
+```{r}
+# PLOT — ROC curves
+
+roc_mp_list <- lapply(names(model_prior_fits), function(nm) {
+  pred_i <- predict(model_prior_fits[[nm]], newdata = test_enc, estimator = "BMA")
+  compute_roc(test_enc, pred_i$fit)
+})
+
+plot_roc(
+  rocs   = roc_mp_list,
+  legend = names(model_prior_fits),
+  title  = "ROC — model prior comparison"
+)
+```
+```{r}
+# PLOT — Predicted probabilities vs Uniform (default)
+
+pred_uniform <- predict(model_prior_fits[["Uniform"]], 
+                        newdata   = test_enc, 
+                        estimator = "BMA")$fit
+
+plots_mp <- lapply(setdiff(names(model_prior_fits), "Uniform"), function(nm) {
+  pred_i <- predict(model_prior_fits[[nm]], newdata = test_enc, estimator = "BMA")$fit
+  
+  df <- data.frame(
+    Uniform = as.numeric(pred_uniform),
+    other   = as.numeric(pred_i),
+    Actual  = test_enc$Satisfaction
+  )
+  
+  ggplot(df, aes(x = Uniform, y = other, color = Actual)) +
+    geom_point(alpha = 0.5, size = 1.5) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    scale_color_manual(values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")) +
+    labs(
+      title = paste("Uniform vs", nm),
+      x     = "Uniform",
+      y     = nm
+    ) +
+    theme_bw()
+})
+
+wrap_plots(plots_mp, ncol = 2)
+```
 
 ### Initial cleanup
 
