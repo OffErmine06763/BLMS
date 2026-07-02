@@ -1535,6 +1535,252 @@ In all three scatter plots the points lie almost exactly on the 45-degree diagon
 
 This confirms that, for this six-variable model, the prior specification has no meaningful effect on the predicted probabilities, and all four choices can be considered interchangeable from a predictive standpoint
 
+# Comparison g prior
+
+- **g = 1** : the prior variance equals the information in a single observation. Coefficients are pulled very strongly toward zero, and the prior dominates unless the likelihood provides overwhelming evidence. This leads to very low PIP for most variables and heavily shrunk posterior means. In practice it is rarely a sensible choice unless the analyst has strong prior belief that all effects are negligible
+
+- **g = 10 :** a moderate value that balances prior and likelihood. Shrinkage is still present but less aggressive than g=1, and variables with a genuine but modest association with the response can achieve reasonable PIP. ROughly comparable in behaviour to aic.prior()
+
+- **g = 100 :** the prior is now quite diffuse, assigning non-negligible probability to large coefficient values. The likelihood dominates and most variables tend to be included. PIP values are generally higher than for smaller g, and posterior means are closer to the MLE. The risk is mild overfitting of the model space
+
+- **g = n :** setting `g` equal to the sample size is known as the **unit-information prior**: the prior carries the same amount of information as a single observation from the dataset. This is exactly the choice underlying `bic.prior()`, and posterior model probabilities approximate BIC weights
+
+```{r}
+# COMPARISON G-PRIOR — g = 1, 10, n, 100
+
+g_configs <- list(
+  list(name = "g = 1",   betaprior = g.prior(g = 1)),
+  list(name = "g = 10",  betaprior = g.prior(g = 10)),
+  list(name = "g = n",   betaprior = g.prior(g = nrow(table_enc))),
+  list(name = "g = 100", betaprior = g.prior(g = 100))
+)
+
+g_fits <- lapply(g_configs, function(cfg) {
+  bas.glm(formula_init, data = table_enc, family = binomial(), betaprior = cfg$betaprior)
+})
+names(g_fits) <- sapply(g_configs, `[[`, "name")
+```
+
+## Pip comparison
+
+```{r}
+# PIP TABLE
+
+pip_g_list <- lapply(names(g_fits), function(nm) {
+  fit_i <- g_fits[[nm]]
+  data.frame(
+    variable = fit_i$namesx,
+    PIP      = round(fit_i$probne0, 3),
+    prior    = nm
+  )
+})
+
+pip_g_compare <- do.call(rbind, pip_g_list)
+
+pip_g_wide <- reshape(
+  pip_g_compare,
+  idvar     = "variable",
+  timevar   = "prior",
+  direction = "wide"
+)
+names(pip_g_wide) <- gsub("PIP\\.", "", names(pip_g_wide))
+rownames(pip_g_wide) <- NULL
+pip_g_wide <- pip_g_wide[order(pip_g_wide[["g = 1"]], decreasing = TRUE), ]
+
+cat("=== PIP — g-prior comparison ===\n")
+print(pip_g_wide, row.names = FALSE)
+```
+```{r}
+# PLOT — PIP barplot confronto g
+
+pip_g_plot_df <- pip_g_compare[pip_g_compare$variable != "Intercept", ]
+pip_g_plot_df$prior <- factor(pip_g_plot_df$prior,
+                              levels = c("g = 1", "g = 10", "g = 100", "g = n"))
+
+ggplot(pip_g_plot_df, aes(x = reorder(variable, PIP), y = PIP, fill = prior)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray40") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(
+    title = "Posterior Inclusion Probabilities — g-prior comparison",
+    x     = NULL,
+    y     = "PIP",
+    fill  = "g"
+  ) +
+  theme_bw()
+```
+**PIP — G-Prior Comparison**
+
+The PIP table reveals a clear pattern: as `g` increases, posterior inclusion probabilities generally decrease for the weaker predictors, while the strongest ones remain robust across all values of `g`.
+
+**Seat.Comfort**, **ClassEco** and **ClassEco Plus** maintain PIP close to 1.000 across all four values of `g`, confirming that these are the dominant drivers of satisfaction in this model. Their inclusion is essentially certain regardless of the prior specification.
+
+**Flight.Distance**, **Age**, **Departure.Delay** and **Arrival.Delay** show much greater sensitivity to `g`. Under `g = 1`, all four have PIP above 0.85, but this is an artefact of the very strong shrinkage: when all coefficients are forced close to zero, even weak predictors appear relevant to absorb residual variation. As `g` increases to 10 and then to `n`, the PIP of these variables drops substantially — most notably `Age` falls from 0.889 to 0.323 and `Arrival.Delay` from 0.849 to 0.375 — revealing that their association with satisfaction is genuinely weak once the prior allows stronger effects for the truly important variables.
+
+The behaviour at `g = 100` is somewhat irregular: PIP values are higher than at `g = n` for several variables, which is unexpected since larger `g` should in principle be less selective. This is likely due to the stochastic nature of the BAS enumeration rather than a genuine prior effect.
+
+Overall, the results confirm that **Seat.Comfort** and **Class** are the only reliable predictors in this six-variable model, while the remaining four covariates carry limited and prior-sensitive signal.
+
+## BMA coefficient
+
+```{r}
+# COEFFICIENTS — posterior mean, SD, 95% credible intervals
+
+coef_g_list <- lapply(names(g_fits), function(nm) {
+  cf <- coef(g_fits[[nm]])
+  ci <- confint(cf)
+  data.frame(
+    variable  = cf$namesx,
+    post.mean = round(cf$postmean, 4),
+    post.sd   = round(cf$postsd,   4),
+    lower.95  = round(ci[, 1],     4),
+    upper.95  = round(ci[, 2],     4),
+    prior     = nm
+  )
+})
+
+coef_g_compare <- do.call(rbind, coef_g_list)
+
+for (v in unique(coef_g_compare$variable)) {
+  sub <- coef_g_compare[coef_g_compare$variable == v,
+                        c("prior", "post.mean", "post.sd", "lower.95", "upper.95")]
+  cat("\n--- Variable:", v, "---\n")
+  print(sub, row.names = FALSE)
+}
+```
+
+```{r}
+# PLOT — Credible intervals
+
+coef_g_plot_df <- coef_g_compare[coef_g_compare$variable != "Intercept", ]
+
+coef_g_plot_df$prior <- factor(coef_g_plot_df$prior,
+                               levels = c("g = 1", "g = 10", "g = 100", "g = n"))
+
+ggplot(coef_g_plot_df, aes(x = prior, y = post.mean, color = prior)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = lower.95, ymax = upper.95), width = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  facet_wrap(~ variable, scales = "free_y", ncol = 3) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Posterior means and 95% credible intervals — g-prior comparison",
+    x     = NULL,
+    y     = "Posterior mean",
+    color = "g"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+```
+**Posterior Coefficients — G-Prior Comparison**
+
+The results show a consistent pattern across variables: as `g` increases from 1 to larger values, posterior means move away from zero and credible intervals widen, reflecting the progressively weaker shrinkage imposed by the prior.
+
+**Seat.Comfort** shows the most striking shrinkage effect: under `g = 1` the posterior mean is only 0.225, roughly half the value obtained under `g = 10`, `g = n` and `g = 100` (all around 0.44–0.45). This is a direct consequence of the very strong shrinkage at `g = 1`, which pulls even well-supported coefficients toward zero. Under all other values of `g` the estimates are consistent and the credible intervals exclude zero, confirming a robust positive effect.
+
+**ClassEco** and **ClassEco Plus** display the same pattern: the magnitude of the negative effect is substantially underestimated at `g = 1` (around −0.83 for both) compared to larger values of `g` (around −1.62 to −1.67), where the credible intervals are tighter and entirely below zero. This confirms that `g = 1` distorts the estimates of even the strongest predictors.
+
+**Age**, **Flight.Distance**, **Departure.Delay** and **Arrival.Delay** all have credible intervals that include zero under most values of `g`, consistent with their low PIP. The upper bounds for `Age` are positive but close to zero, and the delay variables show wide and symmetric intervals, reflecting high uncertainty about their individual contributions given their mutual correlation.
+
+Overall, `g = 1` produces systematically shrunk and unreliable estimates and should be avoided. The estimates under `g = 10`, `g = n` and `g = 100` are broadly consistent with each other, with `g = n` being the theoretically preferred choice among fixed-g options.
+
+## Performance
+
+```{r}
+# PERFORMANCE — Accuracy, Sensitivity, Specificity, AUC
+
+perf_g_summary <- do.call(rbind, lapply(names(g_fits), function(nm) {
+  fit_i      <- g_fits[[nm]]
+  pred_test  <- predict(fit_i, newdata = test_enc, estimator = "BMA")
+  prob_test  <- pred_test$fit
+  perf       <- evaluate_performance(pred_test, 0.5, test_enc)
+  roc_i      <- compute_roc(test_enc, prob_test)
+  
+  data.frame(
+    Prior       = nm,
+    Accuracy    = round(perf$accuracy,    4),
+    Sensitivity = round(perf$sensitivity, 4),
+    Specificity = round(perf$specificity, 4),
+    AUC         = round(as.numeric(auc(roc_i)), 4)
+  )
+}))
+
+cat("=== Performance on Test Set — g-prior comparison ===\n")
+print(perf_g_summary, row.names = FALSE)
+```
+**Performance on Test Set — G-Prior Comparison**
+
+Overall, the four g-prior specifications yield similar predictive performance, with accuracy ranging from 0.733 to 0.757 and AUC values tightly clustered between 0.781 and 0.784. As with the betaprior comparison, the choice of g has limited practical impact on out-of-sample prediction.
+
+**g = n achieves the highest accuracy (0.757) and sensitivity (0.789)**, confirming it as the best-performing fixed-g choice, consistent with its theoretical motivation as the unit-information prior. Its specificity (0.716) is identical to `g = 10`, meaning the gain in accuracy comes from better identification of satisfied customers without sacrificing the ability to detect dissatisfied ones.
+
+**g = 1 shows the most unbalanced behaviour**: it achieves the highest sensitivity (0.813) but the lowest specificity (0.634), meaning it tends to classify most observations as satisfied regardless of the true label. This is a direct consequence of the strong shrinkage at `g = 1`, which flattens predicted probabilities and shifts the effective decision boundary, producing a model biased toward the majority class.
+
+**g = 10 and g = 100** perform similarly to each other and to the betaprior results, with accuracy around 0.740 and a more balanced trade-off between sensitivity and specificity.
+
+**AUC values are nearly identical across all four settings**, ranging from 0.781 to 0.784, confirming that rank discrimination is unaffected by the choice of g. The performance differences observed in accuracy and sensitivity are therefore purely a threshold effect rather than a genuine difference in discriminative ability.
+
+## ROC
+
+```{r}
+# PLOT — ROC curves
+
+roc_g_list <- lapply(names(g_fits), function(nm) {
+  pred_i <- predict(g_fits[[nm]], newdata = test_enc, estimator = "BMA")
+  compute_roc(test_enc, pred_i$fit)
+})
+
+plot_roc(
+  rocs   = roc_g_list,
+  legend = names(g_fits),
+  title  = "ROC — g-prior comparison"
+)
+```
+**ROC Curves — G-Prior Comparison**
+
+The four ROC curves overlap almost perfectly across the entire specificity-sensitivity range, with all AUC values equal to 0.783. This is the visual confirmation of what the performance table already showed: the choice of `g` has no meaningful impact on the discriminative ability of the model.
+
+## Comparison BMA with different g priors
+
+```{r}
+pred_gn <- predict(g_fits[["g = n"]], newdata = test_enc, estimator = "BMA")$fit
+
+plots_g <- lapply(setdiff(names(g_fits), "g = n"), function(nm) {
+  pred_i <- predict(g_fits[[nm]], newdata = test_enc, estimator = "BMA")$fit
+  
+  df <- data.frame(
+    g_n    = as.numeric(pred_gn),
+    other  = as.numeric(pred_i),
+    Actual = test_enc$Satisfaction
+  )
+  
+  ggplot(df, aes(x = g_n, y = other, color = Actual)) +
+    geom_point(alpha = 0.5, size = 1.5) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    scale_color_manual(values = c("Dissatisfied" = "red", "Satisfied" = "forestgreen")) +
+    labs(
+      title = paste("g = n vs", nm),
+      x     = "g = n",
+      y     = nm
+    ) +
+    theme_bw()
+})
+
+wrap_plots(plots_g, ncol = 2)
+```
+**Predicted Probabilities — G-Prior Comparison**
+
+**G = n vs g = 10** and **g = n vs g = 100** show points lying very close to the 45-degree diagonal for both classes, indicating that these three specifications produce nearly identical predicted probabilities across all test observations. The agreement is essentially the same as observed in the betaprior comparison, confirming that once `g` is large enough to let the data dominate, the exact value has little effect on predictions.
+
+**G = n vs g = 1** tells a markedly different story. The points deviate substantially from the diagonal, with `g = 1` predictions compressed into a much narrower range (roughly 0.35 to 0.80) compared to `g = n` (0.10 to 0.95). This is the direct consequence of the strong shrinkage at `g = 1`: predicted probabilities are pulled toward 0.5, making the model less confident in its classifications. The two classes are still separated but with considerably less margin, which explains the lower specificity observed in the performance table.
+
+Overall, the plots confirm that `g = 1` is the only specification that produces meaningfully different predictions, and in a detrimental way. The choices `g = 10`, `g = n` and `g = 100` are essentially interchangeable from a predictive standpoint, with `g = n` remaining the preferred choice on theoretical grounds
+
+
 
 ### Initial cleanup
 
